@@ -8,6 +8,14 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+    // ====== CONFIGURAÇÃO DO SUPABASE ======
+    // Supabase → Project Settings → API. A "anon public key" pode ficar aqui:
+    // ela é pública por natureza; quem protege os dados são as regras do banco (schema.sql).
+    const SUPABASE_URL = '';
+    const SUPABASE_ANON_KEY = '';
+  </script>
   <style>
     @media print {
       .no-print { display: none !important; }
@@ -19,7 +27,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useCallback } = React;
 
     const Icon = ({ name, className = "w-5 h-5" }) => {
       const paths = {
@@ -52,48 +60,6 @@
       </button>
     );
 
-    const INITIAL_DATA = {
-      obras: [
-        { id: 'ob1', nome: 'Residencial Jardins', endereco: 'Av. Epitácio Pessoa, 1450 - João Pessoa/PB', responsavel: 'Eng. Carlos Mendes', inicio: '2026-01-15', previsao: '2026-12-20', orcamento: 1200000, status: 'Em andamento' },
-        { id: 'ob2', nome: 'Edifício Horizonte', endereco: 'Rua das Acácias, 320 - Cabedelo/PB', responsavel: 'Eng. Mariana Costa', inicio: '2026-03-01', previsao: '2027-06-30', orcamento: 2500000, status: 'Em andamento' },
-        { id: 'ob3', nome: 'Galpão Logístico BR-230', endereco: 'Rodovia BR-230, Km 18 - Bayeux/PB', responsavel: 'Mestre José Antônio', inicio: '2026-02-10', previsao: '2026-09-15', orcamento: 850000, status: 'Em andamento' },
-      ],
-      materiais: [
-        { id: 'm1', codigo: 'MAT-001', nome: 'Cimento CP-II 50kg', unidade: 'sc', min: 50, estoques: { ob1: 35, ob2: 140, ob3: 60 } },
-        { id: 'm2', codigo: 'MAT-002', nome: 'Vergalhão CA-50 10mm (12m)', unidade: 'br', min: 40, estoques: { ob1: 85, ob2: 22, ob3: 55 } },
-        { id: 'm3', codigo: 'MAT-003', nome: 'Areia Média Lavada', unidade: 'm³', min: 15, estoques: { ob1: 18, ob2: 30, ob3: 8 } },
-        { id: 'm4', codigo: 'MAT-004', nome: 'Bloco Cerâmico 9x19x19', unidade: 'un', min: 1000, estoques: { ob1: 2400, ob2: 850, ob3: 1500 } },
-        { id: 'm5', codigo: 'MAT-005', nome: 'Tubo PVC Esgoto 100mm (6m)', unidade: 'un', min: 20, estoques: { ob1: 25, ob2: 40, ob3: 12 } },
-      ],
-      movimentacoes: [
-        { id: 'mv1', data: '2026-11-17 08:15', tipo: 'Saída', obraId: 'ob1', obraDestinoId: null, materialId: 'm1', qtd: 15, responsavel: 'Pedro Silva (Pedreiro)', obs: 'Concretagem pilares Térreo' },
-        { id: 'mv2', data: '2026-11-16 14:40', tipo: 'Transferência', obraId: 'ob2', obraDestinoId: 'ob1', materialId: 'm2', qtd: 10, responsavel: 'Almoxarife Marcos', obs: 'Empréstimo emergencial entre canteiros' },
-        { id: 'mv3', data: '2026-11-15 10:00', tipo: 'Entrada', obraId: 'ob2', obraDestinoId: null, materialId: 'm1', qtd: 100, responsavel: 'Almoxarife Marcos', obs: 'NF 4829 - Depósito Construir' },
-      ],
-      fornecedores: [
-        { id: 'f1', nome: 'Depósito Construir Ltda', contato: '(83) 99911-2233', categoria: 'Básicos e Estrutural' },
-        { id: 'f2', nome: 'Aço Nordeste S/A', contato: '(83) 98822-4455', categoria: 'Ferragens e Aço' },
-        { id: 'f3', nome: 'Hidráulica & Elétrica PB', contato: '(83) 98733-6677', categoria: 'Instalações' },
-      ],
-      compras: [
-        { id: 'c1', obraId: 'ob1', materialId: 'm1', fornecedorId: 'f1', qtd: 80, precoUnit: 36.50, entrega: '2026-11-20', status: 'Comprado' },
-        { id: 'c2', obraId: 'ob2', materialId: 'm2', fornecedorId: 'f2', qtd: 60, precoUnit: 54.00, entrega: '2026-11-22', status: 'Solicitado' },
-        { id: 'c3', obraId: 'ob3', materialId: 'm3', fornecedorId: 'f1', qtd: 20, precoUnit: 115.00, entrega: '2026-11-18', status: 'Comprado' },
-      ],
-      despesas: [
-        { id: 'd1', obraId: 'ob1', descricao: 'Lote Cimento e Argamassa (NF 4510)', categoria: 'Material', valor: 18500, vencimento: '2026-11-10', status: 'Pago' },
-        { id: 'd2', obraId: 'ob1', descricao: 'Folha Quinzenal Equipe Campo', categoria: 'Mão de Obra', valor: 42000, vencimento: '2026-11-20', status: 'A pagar' },
-        { id: 'd3', obraId: 'ob2', descricao: 'Aço Estrutural Fundação', categoria: 'Material', valor: 64200, vencimento: '2026-11-12', status: 'Pago' },
-        { id: 'd4', obraId: 'ob3', descricao: 'Locação Betoneira e Andaimes', categoria: 'Equipamentos', valor: 6800, vencimento: '2026-11-25', status: 'A pagar' },
-      ],
-      funcionarios: [
-        { id: 'fn1', nome: 'José Antônio', funcao: 'Mestre de Obras', obraId: 'ob1', presenca: 'Presente' },
-        { id: 'fn2', nome: 'Pedro Silva', funcao: 'Pedreiro', obraId: 'ob1', presenca: 'Presente' },
-        { id: 'fn3', nome: 'Marcos Vinícius', funcao: 'Almoxarife', obraId: 'ob2', presenca: 'Presente' },
-        { id: 'fn4', nome: 'Roberto Alves', funcao: 'Servente', obraId: 'ob2', presenca: 'Falta' },
-        { id: 'fn5', nome: 'Lucas Ferreira', funcao: 'Armador', obraId: 'ob3', presenca: 'Presente' },
-      ]
-    };
 
     const formatBRL = (val) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
@@ -102,9 +68,7 @@
     const isoLocal = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     const hojeISO = () => isoLocal(new Date());
     const somaDias = (dias) => { const d = new Date(); d.setDate(d.getDate() + dias); return isoLocal(d); };
-    const agoraStr = () => { const d = new Date(); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
     const fmtData = (iso) => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) + iso.slice(10) : (iso || '-');
-    const novoId = (prefixo) => prefixo + Date.now() + Math.random().toString(36).slice(2, 6);
     const proximoCodigo = (materiais) => {
       const max = materiais.reduce((acc, m) => {
         const n = parseInt(String(m.codigo || '').replace(/\D/g, ''), 10);
@@ -113,24 +77,17 @@
       return 'MAT-' + String(max + 1).padStart(3, '0');
     };
 
-    // ---------- Usuários e permissões por perfil ----------
-    // ATENÇÃO: enquanto o sistema não tiver servidor/banco, este controle é apenas de interface.
-    const USUARIOS = [
-      { email: 'engenheiro@sigo.com.br', senha: '123456', nome: 'Engenheiro / Admin', perfil: 'Engenheiro' },
-      { email: 'almoxarife@sigo.com.br', senha: '123456', nome: 'Almoxarife', perfil: 'Almoxarife' },
-      { email: 'mestre@sigo.com.br', senha: '123456', nome: 'Mestre de Obras', perfil: 'Mestre de Obras' },
-    ];
-
+    // ---------- Permissões por perfil (a regra de verdade está no banco: supabase/schema.sql) ----------
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'compras', 'financeiro', 'funcionarios', 'relatorios'],
+        abas: ['materiais', 'dashboard', 'obras', 'compras', 'financeiro', 'funcionarios', 'relatorios', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
         abaInicial: 'materiais',
         abas: ['materiais', 'obras', 'compras', 'relatorios'],
-        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'compra.criar', 'compra.editar', 'compra.receber'],
+        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'fornecedor.gerir', 'compra.criar', 'compra.editar', 'compra.receber'],
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
@@ -139,22 +96,97 @@
       },
     };
 
+    // ---------- Conexão com o Supabase ----------
+    const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
+    const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
+
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [] };
+
+    // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
+    const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+    const num = (v) => v === null || v === undefined ? v : Number(v);
+
+    // Lança erro do Supabase de forma amigável
+    const ok = ({ data, error }) => {
+      if (error) {
+        const msg = error.message || String(error);
+        if (/row-level security|permission denied|Sem permissão/i.test(msg)) throw new Error('Seu perfil não tem permissão para esta operação.');
+        if (/violates foreign key/i.test(msg)) throw new Error('Este registro está vinculado a outros lançamentos e não pode ser excluído.');
+        if (/duplicate key.*codigo/i.test(msg)) throw new Error('Já existe um material com este código.');
+        throw new Error(msg);
+      }
+      return data;
+    };
+
+    async function carregarDados(perfil) {
+      const consultas = [
+        sb.from('obras').select('*').order('criado_em'),
+        sb.from('materiais').select('*').order('codigo'),
+        sb.from('estoques').select('*'),
+        sb.from('movimentacoes').select('*').order('data', { ascending: false }).limit(1000),
+        sb.from('fornecedores').select('*').order('nome'),
+        sb.from('compras').select('*').order('data_solicitacao', { ascending: false }),
+        sb.from('funcionarios').select('*').order('nome'),
+        perfil === 'Engenheiro' ? sb.from('despesas').select('*').order('vencimento', { ascending: false }) : Promise.resolve({ data: [] }),
+        perfil === 'Engenheiro' ? sb.from('perfis').select('*').order('criado_em') : Promise.resolve({ data: [] }),
+      ];
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis] = (await Promise.all(consultas)).map(ok);
+      return {
+        obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
+        materiais: materiais.map(m => {
+          const est = {};
+          estoques.filter(e => e.material_id === m.id).forEach(e => { est[e.obra_id] = num(e.saldo); });
+          return { id: m.id, codigo: m.codigo, nome: m.nome, unidade: m.unidade, min: num(m.estoque_minimo), estoques: est };
+        }),
+        movimentacoes: movs.map(m => ({
+          id: m.id, data: tsLocal(m.data), tipo: m.tipo, tipoOriginal: m.tipo_original, estornoDe: m.estorno_de,
+          estornada: m.estornada, obraId: m.obra_id, obraDestinoId: m.obra_destino_id, materialId: m.material_id,
+          qtd: num(m.qtd), responsavel: m.responsavel, obs: m.obs
+        })),
+        fornecedores: forns,
+        compras: compras.map(c => ({
+          id: c.id, obraId: c.obra_id, materialId: c.material_id, fornecedorId: c.fornecedor_id, qtd: num(c.qtd),
+          precoUnit: num(c.preco_unit), entrega: c.entrega, status: c.status, solicitante: c.solicitante, dataSolicitacao: c.data_solicitacao
+        })),
+        despesas: despesas.map(d => ({ id: d.id, compraId: d.compra_id, obraId: d.obra_id, descricao: d.descricao, categoria: d.categoria, valor: num(d.valor), vencimento: d.vencimento, status: d.status })),
+        funcionarios: funcs.map(f => ({ id: f.id, nome: f.nome, funcao: f.funcao, obraId: f.obra_id, presenca: f.presenca })),
+        perfis,
+      };
+    }
+
+    const Moldura = ({ children }) => (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
+          <div className="bg-amber-500 p-6 text-slate-950">
+            <div className="flex items-center gap-3">
+              <div className="bg-slate-950 text-amber-400 p-2.5 rounded-xl">
+                <Icon name="building" className="w-7 h-7" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-black tracking-tight">SIGO</h1>
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-900/80">Sistema Integrado de Gestão de Obras</p>
+              </div>
+            </div>
+          </div>
+          <div className="p-6 space-y-5">{children}</div>
+        </div>
+      </div>
+    );
+
     function App() {
-      const [user, setUser] = useState(null);
+      const [user, setUser] = useState(null);          // { id, email, nome, perfil }
+      const [carregandoSessao, setCarregandoSessao] = useState(true);
       const [loginEmail, setLoginEmail] = useState('');
       const [loginSenha, setLoginSenha] = useState('');
       const [loginErro, setLoginErro] = useState('');
+      const [enviando, setEnviando] = useState(false);
+      const [modoCadastro, setModoCadastro] = useState(false);
+      const [cadastroNome, setCadastroNome] = useState('');
+      const [loginInfo, setLoginInfo] = useState('');
 
-      const [data, setData] = useState(() => {
-        try {
-          const saved = localStorage.getItem('sigo_obras_html_v1');
-          return saved ? JSON.parse(saved) : INITIAL_DATA;
-        } catch { return INITIAL_DATA; }
-      });
-
-      useEffect(() => {
-        try { localStorage.setItem('sigo_obras_html_v1', JSON.stringify(data)); } catch {}
-      }, [data]);
+      const [data, setData] = useState(DADOS_VAZIOS);
+      const [sincronizado, setSincronizado] = useState(null);   // horário da última leitura
+      const [erroConexao, setErroConexao] = useState('');
 
       const [activeTab, setActiveTab] = useState('materiais');
       const [selectedObra, setSelectedObra] = useState('ALL');
@@ -178,22 +210,99 @@
       const [novoFuncModal, setNovoFuncModal] = useState(false);
       const [novoFuncForm, setNovoFuncForm] = useState({});
 
+      const [fornModal, setFornModal] = useState(false);
+      const [fornForm, setFornForm] = useState({});
+
       const perm = user ? PERMISSOES[user.perfil] : null;
       const can = (acao) => !!perm && (perm.acoes.includes('*') || perm.acoes.includes(acao));
       const podeVerAba = (aba) => !!perm && perm.abas.includes(aba);
 
-      const entrar = (usuario) => {
-        setUser({ nome: usuario.nome, perfil: usuario.perfil, email: usuario.email });
-        setActiveTab(PERMISSOES[usuario.perfil].abaInicial);
-        setLoginErro('');
+      // ---------- Sessão ----------
+      const abrirSessao = async (session) => {
+        if (!session) { setUser(null); setData(DADOS_VAZIOS); return; }
+        const { data: p, error } = await sb.from('perfis').select('*').eq('id', session.user.id).maybeSingle();
+        if (error || !p) { setLoginErro('Usuário sem perfil cadastrado. Fale com o Engenheiro responsável.'); await sb.auth.signOut(); return; }
+        if (!p.ativo) { setLoginErro('Seu acesso ainda não foi liberado (ou foi desativado). Fale com o Engenheiro responsável.'); await sb.auth.signOut(); return; }
+        setUser(prev => {
+          if (!prev || prev.id !== p.id) setActiveTab(PERMISSOES[p.perfil].abaInicial);
+          return { id: p.id, email: p.email, nome: p.nome, perfil: p.perfil };
+        });
+      };
+
+      useEffect(() => {
+        if (!sb) { setCarregandoSessao(false); return; }
+        sb.auth.getSession().then(({ data: { session } }) => abrirSessao(session).finally(() => setCarregandoSessao(false)));
+        const { data: { subscription } } = sb.auth.onAuthStateChange((evento, session) => {
+          if (evento === 'SIGNED_OUT') { setUser(null); setData(DADOS_VAZIOS); }
+          if (evento === 'SIGNED_IN') abrirSessao(session);
+        });
+        return () => subscription.unsubscribe();
+      }, []);
+
+      const handleLogin = async (e) => {
+        e.preventDefault();
+        setEnviando(true); setLoginErro('');
+        const { error } = await sb.auth.signInWithPassword({ email: loginEmail.trim(), password: loginSenha });
+        setEnviando(false);
+        if (error) return setLoginErro(/invalid/i.test(error.message) ? 'E-mail ou senha inválidos.' : error.message);
         setLoginSenha('');
       };
 
-      const handleLogin = (e) => {
+      const handleCadastro = async (e) => {
         e.preventDefault();
-        const u = USUARIOS.find(x => x.email.toLowerCase() === loginEmail.trim().toLowerCase() && x.senha === loginSenha);
-        if (!u) return setLoginErro('E-mail ou senha inválidos.');
-        entrar(u);
+        setEnviando(true); setLoginErro(''); setLoginInfo('');
+        const { data: res, error } = await sb.auth.signUp({
+          email: loginEmail.trim(), password: loginSenha,
+          options: { data: { nome: cadastroNome.trim() }, emailRedirectTo: window.location.href.split('#')[0] }
+        });
+        setEnviando(false);
+        if (error) return setLoginErro(error.message);
+        setModoCadastro(false); setLoginSenha('');
+        setLoginInfo(res.session
+          ? 'Conta criada.'
+          : 'Conta criada! Confirme pelo link enviado ao seu e-mail e depois entre aqui.');
+      };
+
+      const handleEsqueciSenha = async () => {
+        if (!loginEmail.trim()) return setLoginErro('Digite seu e-mail acima e clique novamente em "Esqueci a senha".');
+        const { error } = await sb.auth.resetPasswordForEmail(loginEmail.trim(), { redirectTo: window.location.href.split('#')[0] });
+        if (error) return setLoginErro(error.message);
+        alert('Enviamos um link para redefinir a senha no seu e-mail.');
+      };
+
+      const sair = () => sb.auth.signOut();
+
+      // ---------- Leitura + tempo real ----------
+      const recarregar = useCallback(async () => {
+        if (!user) return;
+        try {
+          setData(await carregarDados(user.perfil));
+          setSincronizado(new Date());
+          setErroConexao('');
+        } catch (err) {
+          setErroConexao('Não foi possível ler os dados do servidor: ' + err.message);
+        }
+      }, [user?.id, user?.perfil]);
+
+      useEffect(() => {
+        if (!user) return;
+        recarregar();
+        let timer = null;
+        const agendar = () => { clearTimeout(timer); timer = setTimeout(recarregar, 400); };
+        const canal = sb.channel('sigo-mudancas')
+          .on('postgres_changes', { event: '*', schema: 'public' }, agendar)
+          .subscribe();
+        const aoVoltar = () => { if (document.visibilityState === 'visible') recarregar(); };
+        document.addEventListener('visibilitychange', aoVoltar);
+        return () => { clearTimeout(timer); sb.removeChannel(canal); document.removeEventListener('visibilitychange', aoVoltar); };
+      }, [recarregar]);
+
+      // Executa uma gravação, mostra erro se houver e recarrega os dados
+      const executar = async (fn) => {
+        setEnviando(true);
+        try { await fn(); await recarregar(); return true; }
+        catch (err) { alert(err.message); return false; }
+        finally { setEnviando(false); }
       };
 
       const primeiraObra = () => (selectedObra !== 'ALL' ? selectedObra : data.obras[0]?.id) || '';
@@ -209,6 +318,7 @@
         setNovaObraModal(true);
       };
       const abrirCompra = (compra, materialId) => {
+        if (!compra && (!data.obras.length || !data.materiais.length)) return alert('Cadastre ao menos uma obra e um material antes.');
         setNovaCompraForm(compra ? { ...compra } : {
           obraId: primeiraObra(), materialId: materialId || data.materiais[0]?.id || '',
           fornecedorId: data.fornecedores[0]?.id || '', qtd: '', precoUnit: '', entrega: somaDias(7)
@@ -216,14 +326,21 @@
         setNovaCompraModal(true);
       };
       const abrirDespesa = (desp) => {
+        if (!desp && !data.obras.length) return alert('Cadastre ao menos uma obra antes.');
         setNovaDespesaForm(desp ? { ...desp } : { obraId: primeiraObra(), descricao: '', categoria: 'Material', valor: '', vencimento: somaDias(15), status: 'A pagar' });
         setNovaDespesaModal(true);
       };
       const abrirFuncionario = (func) => {
+        if (!func && !data.obras.length) return alert('Cadastre ao menos uma obra antes.');
         setNovoFuncForm(func ? { ...func } : { nome: '', funcao: 'Pedreiro', obraId: primeiraObra() });
         setNovoFuncModal(true);
       };
+      const abrirFornecedor = (forn) => {
+        setFornForm(forn ? { ...forn } : { nome: '', contato: '', categoria: '' });
+        setFornModal(true);
+      };
       const abrirMov = (tipo) => {
+        if (!data.obras.length || !data.materiais.length) return alert('Cadastre ao menos uma obra e um material antes.');
         const origem = tipo === 'Transferência' ? (data.obras[0]?.id || '') : primeiraObra();
         const destino = data.obras.find(o => o.id !== origem)?.id || origem;
         setMovForm({
@@ -232,6 +349,76 @@
           qtd: '', responsavel: tipo === 'Saída' ? '' : user.nome, obs: ''
         });
         setMovModal(tipo);
+      };
+
+      // ---------- Gravações ----------
+      const salvarMaterial = async (e) => {
+        e.preventDefault();
+        const reg = { codigo: novoMatForm.codigo.trim(), nome: novoMatForm.nome.trim(), unidade: novoMatForm.unidade.trim(), estoque_minimo: Number(novoMatForm.min) };
+        if (await executar(async () => ok(novoMatForm.id
+          ? await sb.from('materiais').update(reg).eq('id', novoMatForm.id)
+          : await sb.from('materiais').insert(reg)))) setNovoMatModal(false);
+      };
+
+      const salvarObra = async (e) => {
+        e.preventDefault();
+        if (novaObraForm.previsao < novaObraForm.inicio) return alert('A previsão de término não pode ser anterior ao início.');
+        const { nome, endereco, responsavel, inicio, previsao, status } = novaObraForm;
+        const reg = { nome, endereco, responsavel, inicio, previsao, status, orcamento: Number(novaObraForm.orcamento) };
+        if (await executar(async () => ok(novaObraForm.id
+          ? await sb.from('obras').update(reg).eq('id', novaObraForm.id)
+          : await sb.from('obras').insert(reg)))) setNovaObraModal(false);
+      };
+
+      const salvarCompra = async (e) => {
+        e.preventDefault();
+        const qtd = Number(novaCompraForm.qtd), precoUnit = Number(novaCompraForm.precoUnit);
+        if (!(qtd > 0) || !(precoUnit >= 0)) return alert('Informe quantidade e preço válidos.');
+        const reg = { obra_id: novaCompraForm.obraId, material_id: novaCompraForm.materialId, fornecedor_id: novaCompraForm.fornecedorId || null,
+                      qtd, preco_unit: precoUnit, entrega: novaCompraForm.entrega || null };
+        if (await executar(async () => ok(novaCompraForm.id
+          ? await sb.from('compras').update(reg).eq('id', novaCompraForm.id)
+          : await sb.from('compras').insert({ ...reg, status: 'Solicitado', solicitante: user.nome })))) setNovaCompraModal(false);
+      };
+
+      const salvarDespesa = async (e) => {
+        e.preventDefault();
+        const valor = Number(novaDespesaForm.valor);
+        if (!(valor > 0)) return alert('Informe um valor maior que zero.');
+        const reg = { obra_id: novaDespesaForm.obraId, descricao: novaDespesaForm.descricao.trim(), categoria: novaDespesaForm.categoria,
+                      valor, vencimento: novaDespesaForm.vencimento || null, status: novaDespesaForm.status };
+        if (await executar(async () => ok(novaDespesaForm.id
+          ? await sb.from('despesas').update(reg).eq('id', novaDespesaForm.id)
+          : await sb.from('despesas').insert(reg)))) setNovaDespesaModal(false);
+      };
+
+      const salvarFuncionario = async (e) => {
+        e.preventDefault();
+        const reg = { nome: novoFuncForm.nome.trim(), funcao: novoFuncForm.funcao.trim(), obra_id: novoFuncForm.obraId || null };
+        if (await executar(async () => ok(novoFuncForm.id
+          ? await sb.from('funcionarios').update(reg).eq('id', novoFuncForm.id)
+          : await sb.from('funcionarios').insert(reg)))) setNovoFuncModal(false);
+      };
+
+      const salvarFornecedor = async (e) => {
+        e.preventDefault();
+        const reg = { nome: fornForm.nome.trim(), contato: fornForm.contato.trim(), categoria: fornForm.categoria.trim() };
+        if (await executar(async () => ok(fornForm.id
+          ? await sb.from('fornecedores').update(reg).eq('id', fornForm.id)
+          : await sb.from('fornecedores').insert(reg)))) setFornModal(false);
+      };
+
+      const alternarStatusDespesa = (d) => executar(async () =>
+        ok(await sb.from('despesas').update({ status: d.status === 'Pago' ? 'A pagar' : 'Pago' }).eq('id', d.id)));
+
+      const marcarPresenca = (f, presenca) => executar(async () =>
+        ok(await sb.rpc('marcar_presenca', { p_funcionario: f.id, p_presenca: presenca })));
+
+      const alterarPerfilUsuario = (p, campos) => {
+        if (p.id === user.id && (campos.perfil && campos.perfil !== 'Engenheiro' || campos.ativo === false)) {
+          return alert('Você não pode retirar o seu próprio acesso de Engenheiro.');
+        }
+        return executar(async () => ok(await sb.from('perfis').update(campos).eq('id', p.id)));
       };
 
       // ---------- Exclusões (com bloqueio quando há vínculos) ----------
@@ -245,11 +432,7 @@
         }
         if (!confirm(`Excluir a obra "${obra.nome}"?`)) return;
         if (selectedObra === obra.id) setSelectedObra('ALL');
-        setData(prev => ({
-          ...prev,
-          obras: prev.obras.filter(o => o.id !== obra.id),
-          materiais: prev.materiais.map(m => { const e = { ...m.estoques }; delete e[obra.id]; return { ...m, estoques: e }; })
-        }));
+        executar(async () => ok(await sb.from('obras').delete().eq('id', obra.id)));
       };
 
       const excluirMaterial = (mat) => {
@@ -259,211 +442,131 @@
           return alert('Este material tem saldo em estoque ou histórico de movimentações/compras e não pode ser excluído. Você pode editar o nome, a unidade ou o mínimo.');
         }
         if (!confirm(`Excluir o material "${mat.nome}"?`)) return;
-        setData(prev => ({ ...prev, materiais: prev.materiais.filter(m => m.id !== mat.id) }));
+        executar(async () => ok(await sb.from('materiais').delete().eq('id', mat.id)));
+      };
+
+      const excluirFornecedor = (forn) => {
+        if (data.compras.some(c => c.fornecedorId === forn.id)) return alert('Este fornecedor tem compras registradas e não pode ser excluído.');
+        if (!confirm(`Excluir o fornecedor "${forn.nome}"?`)) return;
+        executar(async () => ok(await sb.from('fornecedores').delete().eq('id', forn.id)));
       };
 
       const cancelarCompra = (compra) => {
         if (!confirm('Cancelar esta solicitação de compra?')) return;
-        setData(prev => ({ ...prev, compras: prev.compras.map(c => c.id === compra.id ? { ...c, status: 'Cancelado' } : c) }));
+        executar(async () => ok(await sb.from('compras').update({ status: 'Cancelado' }).eq('id', compra.id)));
       };
 
       const excluirDespesa = (desp) => {
         if (!confirm(`Excluir a despesa "${desp.descricao}" (${formatBRL(desp.valor)})?`)) return;
-        setData(prev => ({ ...prev, despesas: prev.despesas.filter(d => d.id !== desp.id) }));
+        executar(async () => ok(await sb.from('despesas').delete().eq('id', desp.id)));
       };
 
       const excluirFuncionario = (func) => {
         if (!confirm(`Excluir o funcionário "${func.nome}"?`)) return;
-        setData(prev => ({ ...prev, funcionarios: prev.funcionarios.filter(f => f.id !== func.id) }));
+        executar(async () => ok(await sb.from('funcionarios').delete().eq('id', func.id)));
       };
 
-      // ---------- Estorno de movimentação (nunca apaga: lança o movimento inverso) ----------
-      const estornarMov = (mv) => {
-        const mat = getMat(mv.materialId);
-        if (!mat) return alert('Material não encontrado.');
-        const qtd = Number(mv.qtd);
-        // Para desfazer uma entrada/transferência, o saldo que recebeu o material precisa ainda tê-lo.
-        const obraQuePerde = mv.tipo === 'Entrada' ? mv.obraId : mv.tipo === 'Transferência' ? mv.obraDestinoId : null;
-        if (obraQuePerde && (mat.estoques[obraQuePerde] || 0) < qtd) {
-          return alert(`Não é possível estornar: a obra "${getObraNome(obraQuePerde)}" tem só ${mat.estoques[obraQuePerde] || 0} ${mat.unidade} desse material (o estorno retiraria ${qtd}).`);
-        }
-        if (!confirm(`Estornar esta ${mv.tipo.toLowerCase()} de ${qtd} ${mat.unidade} de ${mat.nome}?\n\nO registro original será mantido e um lançamento de estorno será criado.`)) return;
-
-        const novosEstoques = { ...mat.estoques };
-        if (mv.tipo === 'Entrada') novosEstoques[mv.obraId] = (novosEstoques[mv.obraId] || 0) - qtd;
-        if (mv.tipo === 'Saída') novosEstoques[mv.obraId] = (novosEstoques[mv.obraId] || 0) + qtd;
-        if (mv.tipo === 'Transferência') {
-          novosEstoques[mv.obraDestinoId] = (novosEstoques[mv.obraDestinoId] || 0) - qtd;
-          novosEstoques[mv.obraId] = (novosEstoques[mv.obraId] || 0) + qtd;
-        }
-        const movEstorno = {
-          id: novoId('mv'), data: agoraStr(), tipo: 'Estorno', tipoOriginal: mv.tipo, estornoDe: mv.id,
-          obraId: mv.obraId, obraDestinoId: mv.obraDestinoId, materialId: mv.materialId, qtd,
-          responsavel: user.nome, obs: `Estorno de ${mv.tipo.toLowerCase()} de ${fmtData(mv.data)}`
-        };
-        setData(prev => ({
-          ...prev,
-          materiais: prev.materiais.map(m => m.id === mat.id ? { ...m, estoques: novosEstoques } : m),
-          movimentacoes: [movEstorno, ...prev.movimentacoes.map(m => m.id === mv.id ? { ...m, estornada: true } : m)]
-        }));
-      };
-
+      // ---------- Estoque: tudo pelas funções do banco (transação única, saldo validado no servidor) ----------
       const getObraNome = (id) => data.obras.find(o => o.id === id)?.nome || 'Obra';
       const getMat = (id) => data.materiais.find(m => m.id === id);
+
+      const estornarMov = (mv) => {
+        const mat = getMat(mv.materialId);
+        if (!confirm(`Estornar esta ${mv.tipo.toLowerCase()} de ${mv.qtd} ${mat?.unidade || ''} de ${mat?.nome || 'material'}?\n\nO registro original será mantido e um lançamento de estorno será criado.`)) return;
+        executar(async () => ok(await sb.rpc('estornar_movimentacao', { p_id: mv.id })));
+      };
 
       const alertasEstoque = useMemo(() => {
         const list = [];
         data.materiais.forEach(mat => {
           data.obras.forEach(obra => {
+            if (obra.status === 'Concluída') return;
             if (selectedObra !== 'ALL' && selectedObra !== obra.id) return;
             const saldo = mat.estoques[obra.id] || 0;
-            if (saldo <= mat.min) {
-              list.push({ mat, obra, saldo });
-            }
+            if (saldo <= mat.min) list.push({ mat, obra, saldo });
           });
         });
         return list;
       }, [data.materiais, data.obras, selectedObra]);
 
-      const handleSaveMov = (e) => {
+      const handleSaveMov = async (e) => {
         e.preventDefault();
         if (!can('mov.' + movModal)) return alert('Seu perfil não tem permissão para esta operação.');
         const qtd = Number(movForm.qtd);
         if (!(qtd > 0) || !movForm.responsavel.trim()) return alert('Informe a quantidade e o responsável.');
-
         if (movModal === 'Transferência' && movForm.obraId === movForm.obraDestinoId) {
           return alert('A obra de destino deve ser diferente da obra de origem.');
         }
-
         const mat = getMat(movForm.materialId);
-        const saldoAtual = mat.estoques[movForm.obraId] || 0;
+        const saldoAtual = mat?.estoques[movForm.obraId] || 0;
         if ((movModal === 'Saída' || movModal === 'Transferência') && qtd > saldoAtual) {
-          return alert(`Saldo insuficiente na obra selecionada (Disponível: ${saldoAtual} ${mat.unidade}).`);
+          return alert(`Saldo insuficiente na obra selecionada (Disponível: ${saldoAtual} ${mat?.unidade}).`);
         }
-
-        const updatedMateriais = data.materiais.map(m => {
-          if (m.id !== movForm.materialId) return m;
-          const novosEstoques = { ...m.estoques };
-          if (movModal === 'Entrada') {
-            novosEstoques[movForm.obraId] = (novosEstoques[movForm.obraId] || 0) + qtd;
-          } else if (movModal === 'Saída') {
-            novosEstoques[movForm.obraId] = (novosEstoques[movForm.obraId] || 0) - qtd;
-          } else if (movModal === 'Transferência') {
-            novosEstoques[movForm.obraId] = (novosEstoques[movForm.obraId] || 0) - qtd;
-            novosEstoques[movForm.obraDestinoId] = (novosEstoques[movForm.obraDestinoId] || 0) + qtd;
-          }
-          return { ...m, estoques: novosEstoques };
-        });
-
-        const novaMov = {
-          id: novoId('mv'),
-          data: agoraStr(),
-          tipo: movModal,
-          obraId: movForm.obraId,
-          obraDestinoId: movModal === 'Transferência' ? movForm.obraDestinoId : null,
-          materialId: movForm.materialId,
-          qtd,
-          responsavel: movForm.responsavel,
-          obs: movForm.obs || '-'
-        };
-
-        setData(prev => ({
-          ...prev,
-          materiais: updatedMateriais,
-          movimentacoes: [novaMov, ...prev.movimentacoes]
-        }));
-        setMovModal(null);
+        const okGravou = await executar(async () => ok(await sb.rpc('registrar_movimentacao', {
+          p_tipo: movModal, p_obra: movForm.obraId,
+          p_obra_destino: movModal === 'Transferência' ? movForm.obraDestinoId : null,
+          p_material: movForm.materialId, p_qtd: qtd, p_responsavel: movForm.responsavel, p_obs: movForm.obs || '-'
+        })));
+        if (okGravou) setMovModal(null);
       };
 
       const handleConfirmarEntregaCompra = (compra) => {
         if (!can('compra.receber')) return alert('Seu perfil não tem permissão para receber compras.');
         if (!confirm('Confirmar o recebimento desta compra? O material entrará no estoque e a despesa será lançada.')) return;
-        const updatedCompras = data.compras.map(c => c.id === compra.id ? { ...c, status: 'Entregue' } : c);
-        const updatedMateriais = data.materiais.map(m => {
-          if (m.id !== compra.materialId) return m;
-          return {
-            ...m,
-            estoques: {
-              ...m.estoques,
-              [compra.obraId]: (m.estoques[compra.obraId] || 0) + Number(compra.qtd)
-            }
-          };
-        });
-        const mat = getMat(compra.materialId);
-        const novaDespesa = {
-          id: novoId('d'),
-          compraId: compra.id,
-          obraId: compra.obraId,
-          descricao: `Compra: ${compra.qtd} ${mat?.unidade} de ${mat?.nome}`,
-          categoria: 'Material',
-          valor: Number(compra.qtd) * Number(compra.precoUnit),
-          vencimento: compra.entrega,
-          status: 'A pagar'
-        };
-        const novaMov = {
-          id: novoId('mv'),
-          data: agoraStr(),
-          tipo: 'Entrada',
-          obraId: compra.obraId,
-          obraDestinoId: null,
-          materialId: compra.materialId,
-          qtd: Number(compra.qtd),
-          responsavel: user.nome,
-          obs: 'Recebimento automático via Módulo de Compras'
-        };
-        setData(prev => ({
-          ...prev,
-          compras: updatedCompras,
-          materiais: updatedMateriais,
-          despesas: [novaDespesa, ...prev.despesas],
-          movimentacoes: [novaMov, ...prev.movimentacoes]
-        }));
+        executar(async () => ok(await sb.rpc('receber_compra', { p_id: compra.id })));
       };
+
+      if (!SUPABASE_CONFIGURADO) {
+        return (
+          <Moldura>
+            <h2 className="font-extrabold text-slate-900">Configuração pendente</h2>
+            <p className="text-sm text-slate-600">
+              Abra o arquivo <code className="bg-slate-100 px-1 rounded">index.html</code> e preencha
+              <code className="bg-slate-100 px-1 rounded">SUPABASE_URL</code> e
+              <code className="bg-slate-100 px-1 rounded">SUPABASE_ANON_KEY</code> com os dados do seu projeto
+              (Supabase → Project Settings → API). O passo a passo está no README.
+            </p>
+          </Moldura>
+        );
+      }
+
+      if (carregandoSessao) {
+        return <Moldura><p className="text-sm text-slate-500 text-center">Carregando…</p></Moldura>;
+      }
 
       if (!user) {
         return (
-          <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full overflow-hidden">
-              <div className="bg-amber-500 p-6 text-slate-950">
-                <div className="flex items-center gap-3">
-                  <div className="bg-slate-950 text-amber-400 p-2.5 rounded-xl">
-                    <Icon name="building" className="w-7 h-7" />
-                  </div>
-                  <div>
-                    <h1 className="text-2xl font-black tracking-tight">SIGO</h1>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-slate-900/80">Sistema Integrado de Gestão de Obras</p>
-                  </div>
+          <Moldura>
+            <h2 className="font-extrabold text-slate-900">{modoCadastro ? 'Criar conta' : 'Entrar'}</h2>
+            <form onSubmit={modoCadastro ? handleCadastro : handleLogin} className="space-y-4">
+              {modoCadastro && (
+                <div>
+                  <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Nome</label>
+                  <input type="text" value={cadastroNome} onChange={e => setCadastroNome(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" required />
                 </div>
+              )}
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">E-mail</label>
+                <input type="email" autoComplete="username" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" required />
               </div>
-              <div className="p-6 space-y-5">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Usuário / E-mail</label>
-                    <input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" required />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Senha</label>
-                    <input type="password" value={loginSenha} onChange={e => setLoginSenha(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" required />
-                  </div>
-                  {loginErro && <p className="text-sm font-semibold text-red-600">{loginErro}</p>}
-                  <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-lg transition">
-                    Entrar no Sistema
-                  </button>
-                </form>
-
-                <div className="pt-4 border-t border-slate-100">
-                  <p className="text-xs font-semibold text-slate-400 text-center mb-3">Acesso de demonstração (senha 123456)</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {USUARIOS.map(u => (
-                      <button key={u.email} type="button" onClick={() => entrar(u)} className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-amber-50 hover:border-amber-200 text-slate-800 text-xs font-bold text-center transition">
-                        {u.perfil}<br/><span className="font-normal text-[10px]">{u.email.split('@')[0]}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
+              <div>
+                <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Senha</label>
+                <input type="password" autoComplete={modoCadastro ? 'new-password' : 'current-password'} minLength={modoCadastro ? 8 : undefined} value={loginSenha} onChange={e => setLoginSenha(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" required />
               </div>
+              {loginErro && <p className="text-sm font-semibold text-red-600">{loginErro}</p>}
+              {loginInfo && <p className="text-sm font-semibold text-emerald-700">{loginInfo}</p>}
+              <button type="submit" disabled={enviando} className="w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white font-bold py-2.5 rounded-lg transition">
+                {enviando ? 'Aguarde…' : modoCadastro ? 'Criar conta' : 'Entrar no Sistema'}
+              </button>
+            </form>
+            <div className="pt-4 border-t border-slate-100 flex justify-between text-xs font-bold">
+              <button type="button" onClick={() => { setModoCadastro(!modoCadastro); setLoginErro(''); setLoginInfo(''); }} className="text-slate-700 hover:underline">
+                {modoCadastro ? 'Já tenho conta' : 'Criar conta'}
+              </button>
+              {!modoCadastro && <button type="button" onClick={handleEsqueciSenha} className="text-slate-500 hover:underline">Esqueci a senha</button>}
             </div>
-          </div>
+            {modoCadastro && <p className="text-xs text-slate-500">Novas contas ficam aguardando liberação do Engenheiro responsável.</p>}
+          </Moldura>
         );
       }
 
@@ -475,6 +578,7 @@
         { id: 'financeiro', label: 'Controle Financeiro', icon: 'dollar' },
         { id: 'funcionarios', label: 'Funcionários', icon: 'users' },
         { id: 'relatorios', label: 'Relatórios', icon: 'file' },
+        { id: 'usuarios', label: 'Usuários', icon: 'users', badge: data.perfis.filter(p => !p.ativo).length || null },
       ].filter(item => podeVerAba(item.id));
 
       // Garante que o perfil só veja abas permitidas
@@ -530,9 +634,12 @@
             <div className="p-4 border-t border-slate-800 flex items-center justify-between text-xs">
               <div>
                 <p className="font-bold text-white">{user.nome}</p>
-                <p className="text-slate-400">Perfil: {user.perfil} • dados neste aparelho</p>
+                <p className="text-slate-400">Perfil: {user.perfil}</p>
+                <p className={erroConexao ? 'text-red-400' : 'text-slate-500'}>
+                  {erroConexao ? 'Sem conexão com o servidor' : sincronizado ? `Sincronizado às ${pad2(sincronizado.getHours())}:${pad2(sincronizado.getMinutes())}` : 'Sincronizando…'}
+                </p>
               </div>
-              <button onClick={() => setUser(null)} title="Sair" className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
+              <button onClick={sair} title="Sair" className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
                 <Icon name="logout" className="w-4 h-4" />
               </button>
             </div>
@@ -563,6 +670,12 @@
             </header>
 
             <div className="p-6 space-y-6 max-w-7xl w-full mx-auto">
+              {erroConexao && (
+                <div className="no-print bg-red-50 border border-red-200 text-red-800 rounded-xl p-4 text-sm flex justify-between items-center gap-3">
+                  <span>{erroConexao}</span>
+                  <button onClick={recarregar} className="bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg">Tentar de novo</button>
+                </div>
+              )}
               {alertasEstoque.length > 0 && (
                 <div className="no-print bg-red-50 border border-red-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-3 text-red-800">
@@ -871,13 +984,23 @@
                   </div>
 
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <h4 className="font-bold text-slate-800 mb-3">Fornecedores Homologados</h4>
+                    <div className="flex justify-between items-center mb-3">
+                      <h4 className="font-bold text-slate-800">Fornecedores Homologados</h4>
+                      {can('fornecedor.gerir') && <BtnAcao onClick={() => abrirFornecedor(null)}>+ Novo fornecedor</BtnAcao>}
+                    </div>
+                    {!data.fornecedores.length && <p className="text-sm text-slate-500">Nenhum fornecedor cadastrado.</p>}
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                       {data.fornecedores.map(f => (
                         <div key={f.id} className="p-3 rounded-xl bg-slate-50 border border-slate-100 text-xs">
                           <p className="font-bold text-slate-900 text-sm">{f.nome}</p>
                           <p className="text-slate-500">{f.categoria}</p>
                           <p className="text-slate-700 font-semibold mt-1">{f.contato}</p>
+                          {can('fornecedor.gerir') && (
+                            <div className="mt-2 no-print">
+                              <BtnAcao onClick={() => abrirFornecedor(f)}>Editar</BtnAcao>
+                              <BtnAcao perigo onClick={() => excluirFornecedor(f)}>Excluir</BtnAcao>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -935,10 +1058,7 @@
                               <button
                                 disabled={!can('despesa.gerir')}
                                 title="Clique para alternar entre Pago / A pagar"
-                                onClick={() => setData(prev => ({
-                                  ...prev,
-                                  despesas: prev.despesas.map(item => item.id === d.id ? { ...item, status: item.status === 'Pago' ? 'A pagar' : 'Pago' } : item)
-                                }))}
+                                onClick={() => alternarStatusDespesa(d)}
                                 className={`px-2.5 py-0.5 rounded text-xs font-bold ${d.status === 'Pago' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}`}
                               >
                                 {d.status}
@@ -989,10 +1109,7 @@
                               <select
                                 disabled={!can('func.presenca')}
                                 value={f.presenca}
-                                onChange={e => setData(prev => ({
-                                  ...prev,
-                                  funcionarios: prev.funcionarios.map(item => item.id === f.id ? { ...item, presenca: e.target.value } : item)
-                                }))}
+                                onChange={e => marcarPresenca(f, e.target.value)}
                                 className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${f.presenca === 'Presente' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}
                               >
                                 <option value="Presente">Presente</option>
@@ -1006,6 +1123,46 @@
                                 <BtnAcao perigo onClick={() => excluirFuncionario(f)}>Excluir</BtnAcao>
                               </td>
                             )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {aba === 'usuarios' && (
+                <div className="space-y-4">
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
+                    Para incluir alguém, peça que a pessoa clique em <strong>"Criar conta"</strong> na tela de entrada.
+                    A conta aparece aqui como <strong>aguardando liberação</strong>: escolha o perfil e clique em <strong>Liberar</strong>.
+                  </div>
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                    <table className="w-full text-sm text-left">
+                      <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                        <tr>
+                          <th className="px-6 py-3">Nome</th>
+                          <th className="px-6 py-3">E-mail</th>
+                          <th className="px-6 py-3">Perfil</th>
+                          <th className="px-6 py-3">Situação</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {data.perfis.map(p => (
+                          <tr key={p.id} className={p.ativo ? '' : 'bg-amber-50/50'}>
+                            <td className="px-6 py-3 font-bold text-slate-800">{p.nome}{p.id === user.id ? ' (você)' : ''}</td>
+                            <td className="px-6 py-3 text-xs">{p.email}</td>
+                            <td className="px-6 py-3">
+                              <select value={p.perfil} disabled={p.id === user.id} onChange={e => alterarPerfilUsuario(p, { perfil: e.target.value })}
+                                className="border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold">
+                                {Object.keys(PERMISSOES).map(k => <option key={k} value={k}>{k}</option>)}
+                              </select>
+                            </td>
+                            <td className="px-6 py-3 whitespace-nowrap">
+                              {p.ativo
+                                ? <><span className="text-xs font-bold text-emerald-700 mr-2">Ativo</span>{p.id !== user.id && <BtnAcao perigo onClick={() => alterarPerfilUsuario(p, { ativo: false })}>Desativar</BtnAcao>}</>
+                                : <><span className="text-xs font-bold text-amber-700 mr-2">Aguardando liberação</span><BtnAcao onClick={() => alterarPerfilUsuario(p, { ativo: true })}>Liberar</BtnAcao></>}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -1105,7 +1262,7 @@
 
                   <div className="flex justify-end gap-2 pt-3">
                     <button type="button" onClick={() => setMovModal(null)} className="px-4 py-2 rounded-lg border border-slate-300 font-bold text-slate-600">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 rounded-lg bg-slate-900 text-white font-bold">Confirmar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 rounded-lg bg-slate-900 text-white font-bold">Confirmar</button>
                   </div>
                 </form>
               </div>
@@ -1116,22 +1273,7 @@
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
                 <h3 className="text-lg font-extrabold">{novoMatForm.id ? 'Editar Material' : 'Cadastrar Novo Material'}</h3>
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  const codigo = novoMatForm.codigo.trim();
-                  if (data.materiais.some(m => m.codigo.toLowerCase() === codigo.toLowerCase() && m.id !== novoMatForm.id)) {
-                    return alert(`Já existe um material com o código ${codigo}.`);
-                  }
-                  const campos = { codigo, nome: novoMatForm.nome.trim(), unidade: novoMatForm.unidade.trim(), min: Number(novoMatForm.min) };
-                  if (novoMatForm.id) {
-                    setData(prev => ({ ...prev, materiais: prev.materiais.map(m => m.id === novoMatForm.id ? { ...m, ...campos } : m) }));
-                  } else {
-                    const estoques = {};
-                    data.obras.forEach(o => estoques[o.id] = 0);
-                    setData(prev => ({ ...prev, materiais: [...prev.materiais, { id: novoId('m'), ...campos, estoques }] }));
-                  }
-                  setNovoMatModal(false);
-                }} className="space-y-3 text-sm">
+                <form onSubmit={salvarMaterial} className="space-y-3 text-sm">
                   <input type="text" placeholder="Código (ex: MAT-006)" value={novoMatForm.codigo} onChange={e => setNovoMatForm({ ...novoMatForm, codigo: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Nome do Material" value={novoMatForm.nome} onChange={e => setNovoMatForm({ ...novoMatForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <div className="grid grid-cols-2 gap-2">
@@ -1140,7 +1282,7 @@
                   </div>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovoMatModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
                   </div>
                 </form>
               </div>
@@ -1151,22 +1293,7 @@
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
                 <h3 className="text-lg font-extrabold">{novaObraForm.id ? 'Editar Obra' : 'Cadastrar Nova Obra'}</h3>
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  if (novaObraForm.previsao < novaObraForm.inicio) return alert('A previsão de término não pode ser anterior ao início.');
-                  const campos = { ...novaObraForm, orcamento: Number(novaObraForm.orcamento) };
-                  if (novaObraForm.id) {
-                    setData(prev => ({ ...prev, obras: prev.obras.map(o => o.id === novaObraForm.id ? { ...o, ...campos } : o) }));
-                  } else {
-                    const newId = novoId('ob');
-                    setData(prev => ({
-                      ...prev,
-                      obras: [...prev.obras, { ...campos, id: newId }],
-                      materiais: prev.materiais.map(m => ({ ...m, estoques: { ...m.estoques, [newId]: 0 } }))
-                    }));
-                  }
-                  setNovaObraModal(false);
-                }} className="space-y-3 text-sm">
+                <form onSubmit={salvarObra} className="space-y-3 text-sm">
                   <input type="text" placeholder="Nome da Obra" value={novaObraForm.nome} onChange={e => setNovaObraForm({ ...novaObraForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Endereço Completo" value={novaObraForm.endereco} onChange={e => setNovaObraForm({ ...novaObraForm, endereco: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Engenheiro / Mestre Responsável" value={novaObraForm.responsavel} onChange={e => setNovaObraForm({ ...novaObraForm, responsavel: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
@@ -1186,7 +1313,7 @@
                   </select>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovaObraModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">{novaObraForm.id ? 'Salvar' : 'Cadastrar'}</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">{novaObraForm.id ? 'Salvar' : 'Cadastrar'}</button>
                   </div>
                 </form>
               </div>
@@ -1197,18 +1324,7 @@
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
                 <h3 className="text-lg font-extrabold">{novaCompraForm.id ? 'Editar Solicitação de Compra' : 'Nova Solicitação de Compra'}</h3>
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  const qtd = Number(novaCompraForm.qtd), precoUnit = Number(novaCompraForm.precoUnit);
-                  if (!(qtd > 0) || !(precoUnit >= 0)) return alert('Informe quantidade e preço válidos.');
-                  const campos = { ...novaCompraForm, qtd, precoUnit };
-                  if (novaCompraForm.id) {
-                    setData(prev => ({ ...prev, compras: prev.compras.map(c => c.id === novaCompraForm.id ? { ...c, ...campos } : c) }));
-                  } else {
-                    setData(prev => ({ ...prev, compras: [{ ...campos, id: novoId('c'), status: 'Solicitado', solicitante: user.nome, dataSolicitacao: hojeISO() }, ...prev.compras] }));
-                  }
-                  setNovaCompraModal(false);
-                }} className="space-y-3 text-sm">
+                <form onSubmit={salvarCompra} className="space-y-3 text-sm">
                   <select value={novaCompraForm.obraId} onChange={e => setNovaCompraForm({ ...novaCompraForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
                     {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                   </select>
@@ -1225,7 +1341,7 @@
                   <input type="date" value={novaCompraForm.entrega} onChange={e => setNovaCompraForm({ ...novaCompraForm, entrega: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovaCompraModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 bg-amber-500 text-slate-950 rounded-lg font-bold">{novaCompraForm.id ? 'Salvar' : 'Solicitar'}</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-amber-500 text-slate-950 rounded-lg font-bold">{novaCompraForm.id ? 'Salvar' : 'Solicitar'}</button>
                   </div>
                 </form>
               </div>
@@ -1236,18 +1352,7 @@
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
                 <h3 className="text-lg font-extrabold">{novaDespesaForm.id ? 'Editar Despesa' : 'Lançar Despesa'}</h3>
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  const valor = Number(novaDespesaForm.valor);
-                  if (!(valor > 0)) return alert('Informe um valor maior que zero.');
-                  const campos = { ...novaDespesaForm, valor };
-                  if (novaDespesaForm.id) {
-                    setData(prev => ({ ...prev, despesas: prev.despesas.map(d => d.id === novaDespesaForm.id ? { ...d, ...campos } : d) }));
-                  } else {
-                    setData(prev => ({ ...prev, despesas: [{ ...campos, id: novoId('d') }, ...prev.despesas] }));
-                  }
-                  setNovaDespesaModal(false);
-                }} className="space-y-3 text-sm">
+                <form onSubmit={salvarDespesa} className="space-y-3 text-sm">
                   <select value={novaDespesaForm.obraId} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
                     {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                   </select>
@@ -1266,7 +1371,24 @@
                   </select>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovaDespesaModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {fornModal && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+                <h3 className="text-lg font-extrabold">{fornForm.id ? 'Editar Fornecedor' : 'Novo Fornecedor'}</h3>
+                <form onSubmit={salvarFornecedor} className="space-y-3 text-sm">
+                  <input type="text" placeholder="Razão social / nome" value={fornForm.nome} onChange={e => setFornForm({ ...fornForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                  <input type="text" placeholder="Contato (telefone / e-mail)" value={fornForm.contato} onChange={e => setFornForm({ ...fornForm, contato: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
+                  <input type="text" placeholder="Categoria (ex: Ferragens e Aço)" value={fornForm.categoria} onChange={e => setFornForm({ ...fornForm, categoria: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setFornModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
                   </div>
                 </form>
               </div>
@@ -1277,15 +1399,7 @@
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
                 <h3 className="text-lg font-extrabold">{novoFuncForm.id ? 'Editar Funcionário' : 'Cadastrar Funcionário'}</h3>
-                <form onSubmit={(e) => {
-                  e.preventDefault();
-                  if (novoFuncForm.id) {
-                    setData(prev => ({ ...prev, funcionarios: prev.funcionarios.map(f => f.id === novoFuncForm.id ? { ...f, ...novoFuncForm } : f) }));
-                  } else {
-                    setData(prev => ({ ...prev, funcionarios: [...prev.funcionarios, { ...novoFuncForm, id: novoId('fn'), presenca: 'Presente' }] }));
-                  }
-                  setNovoFuncModal(false);
-                }} className="space-y-3 text-sm">
+                <form onSubmit={salvarFuncionario} className="space-y-3 text-sm">
                   <input type="text" placeholder="Nome Completo" value={novoFuncForm.nome} onChange={e => setNovoFuncForm({ ...novoFuncForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Função (ex: Pedreiro, Servente)" value={novoFuncForm.funcao} onChange={e => setNovoFuncForm({ ...novoFuncForm, funcao: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <select value={novoFuncForm.obraId} onChange={e => setNovoFuncForm({ ...novoFuncForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
@@ -1293,7 +1407,7 @@
                   </select>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovoFuncModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
                   </div>
                 </form>
               </div>
