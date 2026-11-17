@@ -45,6 +45,13 @@
       );
     };
 
+    const BtnAcao = ({ onClick, perigo, children }) => (
+      <button type="button" onClick={onClick}
+        className={`text-xs font-bold px-2 py-1 rounded mr-1 border transition ${perigo ? 'border-red-200 text-red-700 hover:bg-red-50' : 'border-slate-300 text-slate-700 hover:bg-slate-100'}`}>
+        {children}
+      </button>
+    );
+
     const INITIAL_DATA = {
       obras: [
         { id: 'ob1', nome: 'Residencial Jardins', endereco: 'Av. Epitácio Pessoa, 1450 - João Pessoa/PB', responsavel: 'Eng. Carlos Mendes', inicio: '2026-01-15', previsao: '2026-12-20', orcamento: 1200000, status: 'Em andamento' },
@@ -90,10 +97,53 @@
 
     const formatBRL = (val) => Number(val || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+    // ---------- Datas sempre no fuso local (evita "pular" de dia após 21h por causa do UTC) ----------
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const isoLocal = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+    const hojeISO = () => isoLocal(new Date());
+    const somaDias = (dias) => { const d = new Date(); d.setDate(d.getDate() + dias); return isoLocal(d); };
+    const agoraStr = () => { const d = new Date(); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+    const fmtData = (iso) => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) + iso.slice(10) : (iso || '-');
+    const novoId = (prefixo) => prefixo + Date.now() + Math.random().toString(36).slice(2, 6);
+    const proximoCodigo = (materiais) => {
+      const max = materiais.reduce((acc, m) => {
+        const n = parseInt(String(m.codigo || '').replace(/\D/g, ''), 10);
+        return isNaN(n) ? acc : Math.max(acc, n);
+      }, 0);
+      return 'MAT-' + String(max + 1).padStart(3, '0');
+    };
+
+    // ---------- Usuários e permissões por perfil ----------
+    // ATENÇÃO: enquanto o sistema não tiver servidor/banco, este controle é apenas de interface.
+    const USUARIOS = [
+      { email: 'engenheiro@sigo.com.br', senha: '123456', nome: 'Engenheiro / Admin', perfil: 'Engenheiro' },
+      { email: 'almoxarife@sigo.com.br', senha: '123456', nome: 'Almoxarife', perfil: 'Almoxarife' },
+      { email: 'mestre@sigo.com.br', senha: '123456', nome: 'Mestre de Obras', perfil: 'Mestre de Obras' },
+    ];
+
+    const PERMISSOES = {
+      'Engenheiro': {
+        abaInicial: 'dashboard',
+        abas: ['materiais', 'dashboard', 'obras', 'compras', 'financeiro', 'funcionarios', 'relatorios'],
+        acoes: ['*'],
+      },
+      'Almoxarife': {
+        abaInicial: 'materiais',
+        abas: ['materiais', 'obras', 'compras', 'relatorios'],
+        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'compra.criar', 'compra.editar', 'compra.receber'],
+      },
+      'Mestre de Obras': {
+        abaInicial: 'materiais',
+        abas: ['materiais', 'obras', 'compras', 'funcionarios'],
+        acoes: ['mov.Saída', 'compra.criar', 'func.presenca'],
+      },
+    };
+
     function App() {
       const [user, setUser] = useState(null);
-      const [loginEmail, setLoginEmail] = useState('almoxarife@sigo.com.br');
-      const [loginSenha, setLoginSenha] = useState('123456');
+      const [loginEmail, setLoginEmail] = useState('');
+      const [loginSenha, setLoginSenha] = useState('');
+      const [loginErro, setLoginErro] = useState('');
 
       const [data, setData] = useState(() => {
         try {
@@ -110,26 +160,152 @@
       const [selectedObra, setSelectedObra] = useState('ALL');
 
       const [movModal, setMovModal] = useState(null);
-      const [movForm, setMovForm] = useState({ obraId: 'ob1', obraDestinoId: 'ob2', materialId: 'm1', qtd: 10, responsavel: '', obs: '' });
+      const [movForm, setMovForm] = useState({ obraId: '', obraDestinoId: '', materialId: '', qtd: 1, responsavel: '', obs: '' });
 
+      // Os formulários abaixo servem para "novo" e "editar": quando o form tem `id`, é edição.
       const [novoMatModal, setNovoMatModal] = useState(false);
-      const [novoMatForm, setNovoMatForm] = useState({ codigo: 'MAT-006', nome: '', unidade: 'un', min: 10 });
+      const [novoMatForm, setNovoMatForm] = useState({});
 
       const [novaObraModal, setNovaObraModal] = useState(false);
-      const [novaObraForm, setNovaObraForm] = useState({ nome: '', endereco: '', responsavel: '', inicio: '2026-11-17', previsao: '2027-08-30', orcamento: 1000000 });
+      const [novaObraForm, setNovaObraForm] = useState({});
 
       const [novaCompraModal, setNovaCompraModal] = useState(false);
-      const [novaCompraForm, setNovaCompraForm] = useState({ obraId: 'ob1', materialId: 'm1', fornecedorId: 'f1', qtd: 20, precoUnit: 35, entrega: '2026-11-25' });
+      const [novaCompraForm, setNovaCompraForm] = useState({});
 
       const [novaDespesaModal, setNovaDespesaModal] = useState(false);
-      const [novaDespesaForm, setNovaDespesaForm] = useState({ obraId: 'ob1', descricao: '', categoria: 'Material', valor: 1000, vencimento: '2026-11-30', status: 'A pagar' });
+      const [novaDespesaForm, setNovaDespesaForm] = useState({});
 
       const [novoFuncModal, setNovoFuncModal] = useState(false);
-      const [novoFuncForm, setNovoFuncForm] = useState({ nome: '', funcao: 'Pedreiro', obraId: 'ob1' });
+      const [novoFuncForm, setNovoFuncForm] = useState({});
 
-      const handleQuickLogin = (perfil, defaultTab) => {
-        setUser({ nome: perfil, perfil });
-        setActiveTab(defaultTab);
+      const perm = user ? PERMISSOES[user.perfil] : null;
+      const can = (acao) => !!perm && (perm.acoes.includes('*') || perm.acoes.includes(acao));
+      const podeVerAba = (aba) => !!perm && perm.abas.includes(aba);
+
+      const entrar = (usuario) => {
+        setUser({ nome: usuario.nome, perfil: usuario.perfil, email: usuario.email });
+        setActiveTab(PERMISSOES[usuario.perfil].abaInicial);
+        setLoginErro('');
+        setLoginSenha('');
+      };
+
+      const handleLogin = (e) => {
+        e.preventDefault();
+        const u = USUARIOS.find(x => x.email.toLowerCase() === loginEmail.trim().toLowerCase() && x.senha === loginSenha);
+        if (!u) return setLoginErro('E-mail ou senha inválidos.');
+        entrar(u);
+      };
+
+      const primeiraObra = () => (selectedObra !== 'ALL' ? selectedObra : data.obras[0]?.id) || '';
+
+      // ---------- Abertura de formulários (novo / editar) ----------
+      const abrirMaterial = (mat) => {
+        setNovoMatForm(mat ? { id: mat.id, codigo: mat.codigo, nome: mat.nome, unidade: mat.unidade, min: mat.min }
+                           : { codigo: proximoCodigo(data.materiais), nome: '', unidade: 'un', min: 10 });
+        setNovoMatModal(true);
+      };
+      const abrirObra = (obra) => {
+        setNovaObraForm(obra ? { ...obra } : { nome: '', endereco: '', responsavel: '', inicio: hojeISO(), previsao: somaDias(365), orcamento: '', status: 'Em andamento' });
+        setNovaObraModal(true);
+      };
+      const abrirCompra = (compra, materialId) => {
+        setNovaCompraForm(compra ? { ...compra } : {
+          obraId: primeiraObra(), materialId: materialId || data.materiais[0]?.id || '',
+          fornecedorId: data.fornecedores[0]?.id || '', qtd: '', precoUnit: '', entrega: somaDias(7)
+        });
+        setNovaCompraModal(true);
+      };
+      const abrirDespesa = (desp) => {
+        setNovaDespesaForm(desp ? { ...desp } : { obraId: primeiraObra(), descricao: '', categoria: 'Material', valor: '', vencimento: somaDias(15), status: 'A pagar' });
+        setNovaDespesaModal(true);
+      };
+      const abrirFuncionario = (func) => {
+        setNovoFuncForm(func ? { ...func } : { nome: '', funcao: 'Pedreiro', obraId: primeiraObra() });
+        setNovoFuncModal(true);
+      };
+      const abrirMov = (tipo) => {
+        const origem = tipo === 'Transferência' ? (data.obras[0]?.id || '') : primeiraObra();
+        const destino = data.obras.find(o => o.id !== origem)?.id || origem;
+        setMovForm({
+          obraId: origem, obraDestinoId: destino,
+          materialId: data.materiais.some(m => m.id === movForm.materialId) ? movForm.materialId : (data.materiais[0]?.id || ''),
+          qtd: '', responsavel: tipo === 'Saída' ? '' : user.nome, obs: ''
+        });
+        setMovModal(tipo);
+      };
+
+      // ---------- Exclusões (com bloqueio quando há vínculos) ----------
+      const excluirObra = (obra) => {
+        const temEstoque = data.materiais.some(m => (m.estoques[obra.id] || 0) > 0);
+        const temVinculo = data.movimentacoes.some(m => m.obraId === obra.id || m.obraDestinoId === obra.id)
+          || data.compras.some(c => c.obraId === obra.id) || data.despesas.some(d => d.obraId === obra.id)
+          || data.funcionarios.some(f => f.obraId === obra.id);
+        if (temEstoque || temVinculo) {
+          return alert('Esta obra já tem estoque, movimentações, compras, despesas ou funcionários vinculados e não pode ser excluída.\n\nUse "Editar" e altere o status para "Concluída" ou "Paralisada".');
+        }
+        if (!confirm(`Excluir a obra "${obra.nome}"?`)) return;
+        if (selectedObra === obra.id) setSelectedObra('ALL');
+        setData(prev => ({
+          ...prev,
+          obras: prev.obras.filter(o => o.id !== obra.id),
+          materiais: prev.materiais.map(m => { const e = { ...m.estoques }; delete e[obra.id]; return { ...m, estoques: e }; })
+        }));
+      };
+
+      const excluirMaterial = (mat) => {
+        const saldo = Object.values(mat.estoques).reduce((s, v) => s + Number(v || 0), 0);
+        const temVinculo = data.movimentacoes.some(m => m.materialId === mat.id) || data.compras.some(c => c.materialId === mat.id);
+        if (saldo > 0 || temVinculo) {
+          return alert('Este material tem saldo em estoque ou histórico de movimentações/compras e não pode ser excluído. Você pode editar o nome, a unidade ou o mínimo.');
+        }
+        if (!confirm(`Excluir o material "${mat.nome}"?`)) return;
+        setData(prev => ({ ...prev, materiais: prev.materiais.filter(m => m.id !== mat.id) }));
+      };
+
+      const cancelarCompra = (compra) => {
+        if (!confirm('Cancelar esta solicitação de compra?')) return;
+        setData(prev => ({ ...prev, compras: prev.compras.map(c => c.id === compra.id ? { ...c, status: 'Cancelado' } : c) }));
+      };
+
+      const excluirDespesa = (desp) => {
+        if (!confirm(`Excluir a despesa "${desp.descricao}" (${formatBRL(desp.valor)})?`)) return;
+        setData(prev => ({ ...prev, despesas: prev.despesas.filter(d => d.id !== desp.id) }));
+      };
+
+      const excluirFuncionario = (func) => {
+        if (!confirm(`Excluir o funcionário "${func.nome}"?`)) return;
+        setData(prev => ({ ...prev, funcionarios: prev.funcionarios.filter(f => f.id !== func.id) }));
+      };
+
+      // ---------- Estorno de movimentação (nunca apaga: lança o movimento inverso) ----------
+      const estornarMov = (mv) => {
+        const mat = getMat(mv.materialId);
+        if (!mat) return alert('Material não encontrado.');
+        const qtd = Number(mv.qtd);
+        // Para desfazer uma entrada/transferência, o saldo que recebeu o material precisa ainda tê-lo.
+        const obraQuePerde = mv.tipo === 'Entrada' ? mv.obraId : mv.tipo === 'Transferência' ? mv.obraDestinoId : null;
+        if (obraQuePerde && (mat.estoques[obraQuePerde] || 0) < qtd) {
+          return alert(`Não é possível estornar: a obra "${getObraNome(obraQuePerde)}" tem só ${mat.estoques[obraQuePerde] || 0} ${mat.unidade} desse material (o estorno retiraria ${qtd}).`);
+        }
+        if (!confirm(`Estornar esta ${mv.tipo.toLowerCase()} de ${qtd} ${mat.unidade} de ${mat.nome}?\n\nO registro original será mantido e um lançamento de estorno será criado.`)) return;
+
+        const novosEstoques = { ...mat.estoques };
+        if (mv.tipo === 'Entrada') novosEstoques[mv.obraId] = (novosEstoques[mv.obraId] || 0) - qtd;
+        if (mv.tipo === 'Saída') novosEstoques[mv.obraId] = (novosEstoques[mv.obraId] || 0) + qtd;
+        if (mv.tipo === 'Transferência') {
+          novosEstoques[mv.obraDestinoId] = (novosEstoques[mv.obraDestinoId] || 0) - qtd;
+          novosEstoques[mv.obraId] = (novosEstoques[mv.obraId] || 0) + qtd;
+        }
+        const movEstorno = {
+          id: novoId('mv'), data: agoraStr(), tipo: 'Estorno', tipoOriginal: mv.tipo, estornoDe: mv.id,
+          obraId: mv.obraId, obraDestinoId: mv.obraDestinoId, materialId: mv.materialId, qtd,
+          responsavel: user.nome, obs: `Estorno de ${mv.tipo.toLowerCase()} de ${fmtData(mv.data)}`
+        };
+        setData(prev => ({
+          ...prev,
+          materiais: prev.materiais.map(m => m.id === mat.id ? { ...m, estoques: novosEstoques } : m),
+          movimentacoes: [movEstorno, ...prev.movimentacoes.map(m => m.id === mv.id ? { ...m, estornada: true } : m)]
+        }));
       };
 
       const getObraNome = (id) => data.obras.find(o => o.id === id)?.nome || 'Obra';
@@ -151,8 +327,9 @@
 
       const handleSaveMov = (e) => {
         e.preventDefault();
+        if (!can('mov.' + movModal)) return alert('Seu perfil não tem permissão para esta operação.');
         const qtd = Number(movForm.qtd);
-        if (qtd <= 0 || !movForm.responsavel.trim()) return alert('Informe a quantidade e o responsável.');
+        if (!(qtd > 0) || !movForm.responsavel.trim()) return alert('Informe a quantidade e o responsável.');
 
         if (movModal === 'Transferência' && movForm.obraId === movForm.obraDestinoId) {
           return alert('A obra de destino deve ser diferente da obra de origem.');
@@ -178,11 +355,9 @@
           return { ...m, estoques: novosEstoques };
         });
 
-        const now = new Date();
-        const dataStr = now.toISOString().slice(0, 10) + ' ' + now.toTimeString().slice(0, 5);
         const novaMov = {
-          id: 'mv' + Date.now(),
-          data: dataStr,
+          id: novoId('mv'),
+          data: agoraStr(),
           tipo: movModal,
           obraId: movForm.obraId,
           obraDestinoId: movModal === 'Transferência' ? movForm.obraDestinoId : null,
@@ -201,6 +376,8 @@
       };
 
       const handleConfirmarEntregaCompra = (compra) => {
+        if (!can('compra.receber')) return alert('Seu perfil não tem permissão para receber compras.');
+        if (!confirm('Confirmar o recebimento desta compra? O material entrará no estoque e a despesa será lançada.')) return;
         const updatedCompras = data.compras.map(c => c.id === compra.id ? { ...c, status: 'Entregue' } : c);
         const updatedMateriais = data.materiais.map(m => {
           if (m.id !== compra.materialId) return m;
@@ -214,7 +391,8 @@
         });
         const mat = getMat(compra.materialId);
         const novaDespesa = {
-          id: 'd' + Date.now(),
+          id: novoId('d'),
+          compraId: compra.id,
           obraId: compra.obraId,
           descricao: `Compra: ${compra.qtd} ${mat?.unidade} de ${mat?.nome}`,
           categoria: 'Material',
@@ -223,8 +401,8 @@
           status: 'A pagar'
         };
         const novaMov = {
-          id: 'mv' + Date.now(),
-          data: new Date().toISOString().slice(0, 10) + ' 12:00',
+          id: novoId('mv'),
+          data: agoraStr(),
           tipo: 'Entrada',
           obraId: compra.obraId,
           obraDestinoId: null,
@@ -258,7 +436,7 @@
                 </div>
               </div>
               <div className="p-6 space-y-5">
-                <form onSubmit={(e) => { e.preventDefault(); handleQuickLogin('Administrador', 'dashboard'); }} className="space-y-4">
+                <form onSubmit={handleLogin} className="space-y-4">
                   <div>
                     <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Usuário / E-mail</label>
                     <input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" required />
@@ -267,23 +445,20 @@
                     <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Senha</label>
                     <input type="password" value={loginSenha} onChange={e => setLoginSenha(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" required />
                   </div>
+                  {loginErro && <p className="text-sm font-semibold text-red-600">{loginErro}</p>}
                   <button type="submit" className="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 rounded-lg transition">
                     Entrar no Sistema
                   </button>
                 </form>
 
                 <div className="pt-4 border-t border-slate-100">
-                  <p className="text-xs font-semibold text-slate-400 text-center mb-3">Acesso Rápido por Perfil Operacional</p>
+                  <p className="text-xs font-semibold text-slate-400 text-center mb-3">Acesso de demonstração (senha 123456)</p>
                   <div className="grid grid-cols-3 gap-2">
-                    <button onClick={() => handleQuickLogin('Almoxarife', 'materiais')} className="p-2.5 rounded-lg border border-amber-200 bg-amber-50 hover:bg-amber-100 text-amber-900 text-xs font-bold text-center transition">
-                      Almoxarife<br/><span className="font-normal text-[10px]">Estoque Multiobra</span>
-                    </button>
-                    <button onClick={() => handleQuickLogin('Mestre de Obras', 'materiais')} className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold text-center transition">
-                      Mestre Obras<br/><span className="font-normal text-[10px]">Canteiro / Equipe</span>
-                    </button>
-                    <button onClick={() => handleQuickLogin('Engenheiro / Admin', 'dashboard')} className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-800 text-xs font-bold text-center transition">
-                      Engenheiro<br/><span className="font-normal text-[10px]">Painel & Custos</span>
-                    </button>
+                    {USUARIOS.map(u => (
+                      <button key={u.email} type="button" onClick={() => entrar(u)} className="p-2.5 rounded-lg border border-slate-200 bg-slate-50 hover:bg-amber-50 hover:border-amber-200 text-slate-800 text-xs font-bold text-center transition">
+                        {u.perfil}<br/><span className="font-normal text-[10px]">{u.email.split('@')[0]}</span>
+                      </button>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -300,7 +475,10 @@
         { id: 'financeiro', label: 'Controle Financeiro', icon: 'dollar' },
         { id: 'funcionarios', label: 'Funcionários', icon: 'users' },
         { id: 'relatorios', label: 'Relatórios', icon: 'file' },
-      ];
+      ].filter(item => podeVerAba(item.id));
+
+      // Garante que o perfil só veja abas permitidas
+      const aba = podeVerAba(activeTab) ? activeTab : perm.abaInicial;
 
       const obrasVisiveis = selectedObra === 'ALL' ? data.obras : data.obras.filter(o => o.id === selectedObra);
       const movsVisiveis = selectedObra === 'ALL' ? data.movimentacoes : data.movimentacoes.filter(m => m.obraId === selectedObra || m.obraDestinoId === selectedObra);
@@ -333,7 +511,7 @@
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
                   className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
-                    activeTab === item.id ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-300 hover:bg-slate-800'
+                    aba === item.id ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
                   <span className="flex items-center gap-2.5">
@@ -341,7 +519,7 @@
                     {item.label}
                   </span>
                   {item.badge ? (
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${activeTab === item.id ? 'bg-slate-950 text-amber-400' : 'bg-red-500 text-white'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-bold ${aba === item.id ? 'bg-slate-950 text-amber-400' : 'bg-red-500 text-white'}`}>
                       {item.badge}
                     </span>
                   ) : null}
@@ -352,7 +530,7 @@
             <div className="p-4 border-t border-slate-800 flex items-center justify-between text-xs">
               <div>
                 <p className="font-bold text-white">{user.nome}</p>
-                <p className="text-slate-400">Online • Banco Integrado</p>
+                <p className="text-slate-400">Perfil: {user.perfil} • dados neste aparelho</p>
               </div>
               <button onClick={() => setUser(null)} title="Sair" className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
                 <Icon name="logout" className="w-4 h-4" />
@@ -364,9 +542,9 @@
             <header className="no-print bg-white border-b border-slate-200 px-6 py-4 flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-extrabold text-slate-900">
-                  {menuItems.find(m => m.id === activeTab)?.label}
+                  {menuItems.find(m => m.id === aba)?.label}
                 </h2>
-                <p className="text-xs text-slate-500">Controle centralizado em tempo real para todos os canteiros</p>
+                <p className="text-xs text-slate-500">Controle de materiais, compras, custos e equipes por canteiro</p>
               </div>
 
               <div className="flex items-center gap-3">
@@ -398,42 +576,44 @@
                       ))}
                     </div>
                   </div>
-                  <button
-                    onClick={() => { setActiveTab('compras'); setNovaCompraModal(true); }}
-                    className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition"
-                  >
-                    Solicitar Reposição
-                  </button>
+                  {can('compra.criar') && (
+                    <button
+                      onClick={() => { setActiveTab('compras'); abrirCompra(null, alertasEstoque[0]?.mat.id); }}
+                      className="bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-3 py-2 rounded-lg transition"
+                    >
+                      Solicitar Reposição
+                    </button>
+                  )}
                 </div>
               )}
 
-              {activeTab === 'materiais' && (
+              {aba === 'materiais' && (
                 <div className="space-y-6">
                   <div className="flex flex-wrap gap-3">
-                    <button
-                      onClick={() => { setMovForm({ ...movForm, obraId: selectedObra === 'ALL' ? data.obras[0]?.id : selectedObra, responsavel: user.nome, obs: '' }); setMovModal('Entrada'); }}
+                    {can('mov.Entrada') && <button
+                      onClick={() => abrirMov('Entrada')}
                       className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition"
                     >
                       <Icon name="arrowDown" className="w-4 h-4" /> Registrar Entrada
-                    </button>
-                    <button
-                      onClick={() => { setMovForm({ ...movForm, obraId: selectedObra === 'ALL' ? data.obras[0]?.id : selectedObra, responsavel: '', obs: '' }); setMovModal('Saída'); }}
+                    </button>}
+                    {can('mov.Saída') && <button
+                      onClick={() => abrirMov('Saída')}
                       className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition"
                     >
                       <Icon name="arrowUp" className="w-4 h-4" /> Registrar Saída (Retirada)
-                    </button>
-                    <button
-                      onClick={() => { setMovForm({ ...movForm, obraId: data.obras[0]?.id, obraDestinoId: data.obras[1]?.id || data.obras[0]?.id, responsavel: user.nome, obs: '' }); setMovModal('Transferência'); }}
+                    </button>}
+                    {can('mov.Transferência') && data.obras.length > 1 && <button
+                      onClick={() => abrirMov('Transferência')}
                       className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm transition"
                     >
                       <Icon name="transfer" className="w-4 h-4" /> Transferir entre Obras
-                    </button>
-                    <button
-                      onClick={() => setNovoMatModal(true)}
+                    </button>}
+                    {can('material.gerir') && <button
+                      onClick={() => abrirMaterial(null)}
                       className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2 ml-auto transition"
                     >
                       <Icon name="plus" className="w-4 h-4" /> Cadastrar Material
-                    </button>
+                    </button>}
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -452,6 +632,7 @@
                               <th key={o.id} className="px-6 py-3">{o.nome}</th>
                             ))}
                             <th className="px-6 py-3">Total Geral</th>
+                            {can('material.gerir') && <th className="px-6 py-3 no-print">Ações</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -474,6 +655,12 @@
                                   );
                                 })}
                                 <td className="px-6 py-3.5 font-extrabold text-slate-900">{totalGeral} {mat.unidade}</td>
+                                {can('material.gerir') && (
+                                  <td className="px-6 py-3.5 no-print whitespace-nowrap">
+                                    <BtnAcao onClick={() => abrirMaterial(mat)}>Editar</BtnAcao>
+                                    <BtnAcao perigo onClick={() => excluirMaterial(mat)}>Excluir</BtnAcao>
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -497,25 +684,36 @@
                             <th className="px-6 py-3">Obra(s)</th>
                             <th className="px-6 py-3">Retirado / Recebido por</th>
                             <th className="px-6 py-3">Observação</th>
+                            {can('mov.estornar') && <th className="px-6 py-3 no-print">Ação</th>}
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {movsVisiveis.map(mv => {
                             const mat = getMat(mv.materialId);
-                            const badgeColor = mv.tipo === 'Entrada' ? 'bg-emerald-100 text-emerald-800' : mv.tipo === 'Saída' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800';
+                            const badgeColor = mv.tipo === 'Entrada' ? 'bg-emerald-100 text-emerald-800' : mv.tipo === 'Saída' ? 'bg-amber-100 text-amber-800' : mv.tipo === 'Estorno' ? 'bg-slate-200 text-slate-700' : 'bg-blue-100 text-blue-800';
                             return (
-                              <tr key={mv.id} className="hover:bg-slate-50">
-                                <td className="px-6 py-3 text-xs text-slate-500">{mv.data}</td>
-                                <td className="px-6 py-3"><span className={`px-2 py-0.5 rounded text-xs font-bold ${badgeColor}`}>{mv.tipo}</span></td>
+                              <tr key={mv.id} className={`hover:bg-slate-50 ${mv.estornada ? 'opacity-50' : ''}`}>
+                                <td className="px-6 py-3 text-xs text-slate-500 whitespace-nowrap">{fmtData(mv.data)}</td>
+                                <td className="px-6 py-3">
+                                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${badgeColor}`}>{mv.tipo}{mv.tipo === 'Estorno' ? ` (${mv.tipoOriginal})` : ''}</span>
+                                  {mv.estornada && <span className="block text-[10px] font-bold text-red-600 mt-1">ESTORNADA</span>}
+                                </td>
                                 <td className="px-6 py-3 font-semibold text-slate-800">{mat?.nome}</td>
                                 <td className="px-6 py-3 font-bold">{mv.qtd} {mat?.unidade}</td>
                                 <td className="px-6 py-3 text-xs">
                                   {mv.tipo === 'Transferência'
                                     ? <span><strong>{getObraNome(mv.obraId)}</strong> → <strong>{getObraNome(mv.obraDestinoId)}</strong></span>
+                                    : mv.tipo === 'Estorno' && mv.tipoOriginal === 'Transferência'
+                                    ? <span><strong>{getObraNome(mv.obraDestinoId)}</strong> → <strong>{getObraNome(mv.obraId)}</strong></span>
                                     : getObraNome(mv.obraId)}
                                 </td>
                                 <td className="px-6 py-3 font-medium text-slate-700">{mv.responsavel}</td>
                                 <td className="px-6 py-3 text-xs text-slate-500">{mv.obs}</td>
+                                {can('mov.estornar') && (
+                                  <td className="px-6 py-3 no-print">
+                                    {mv.tipo !== 'Estorno' && !mv.estornada && <BtnAcao perigo onClick={() => estornarMov(mv)}>Estornar</BtnAcao>}
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -526,13 +724,13 @@
                 </div>
               )}
 
-              {activeTab === 'dashboard' && (
+              {aba === 'dashboard' && (
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold uppercase text-slate-400">Obras Ativas</p>
-                      <p className="text-3xl font-black text-slate-900 mt-1">{obrasVisiveis.length}</p>
-                      <p className="text-xs text-emerald-600 font-semibold mt-2">100% em execução</p>
+                      <p className="text-3xl font-black text-slate-900 mt-1">{obrasVisiveis.filter(o => o.status === 'Em andamento').length}</p>
+                      <p className="text-xs text-slate-500 font-semibold mt-2">de {obrasVisiveis.length} cadastrada(s)</p>
                     </div>
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold uppercase text-slate-400">Orçamento Total</p>
@@ -556,7 +754,7 @@
                     <div className="space-y-4">
                       {obrasVisiveis.map(obra => {
                         const gastoObra = data.despesas.filter(d => d.obraId === obra.id).reduce((s, d) => s + Number(d.valor), 0);
-                        const pct = Math.min(100, (gastoObra / Number(obra.orcamento)) * 100);
+                        const pct = Number(obra.orcamento) > 0 ? Math.min(100, (gastoObra / Number(obra.orcamento)) * 100) : 0;
                         return (
                           <div key={obra.id} className="space-y-1.5">
                             <div className="flex justify-between text-sm">
@@ -576,39 +774,49 @@
                 </div>
               )}
 
-              {activeTab === 'obras' && (
+              {aba === 'obras' && (
                 <div className="space-y-4">
-                  <div className="flex justify-end">
-                    <button onClick={() => setNovaObraModal(true)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
-                      <Icon name="plus" className="w-4 h-4" /> Nova Obra
-                    </button>
-                  </div>
+                  {can('obra.gerir') && (
+                    <div className="flex justify-end">
+                      <button onClick={() => abrirObra(null)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                        <Icon name="plus" className="w-4 h-4" /> Nova Obra
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {obrasVisiveis.map(obra => (
                       <div key={obra.id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
                         <div className="flex justify-between items-start">
                           <h3 className="font-extrabold text-slate-900 text-base">{obra.nome}</h3>
-                          <span className="bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-0.5 rounded-full">{obra.status}</span>
+                          <span className={`text-xs font-bold px-2.5 py-0.5 rounded-full ${obra.status === 'Em andamento' ? 'bg-emerald-100 text-emerald-800' : obra.status === 'Paralisada' ? 'bg-red-100 text-red-800' : 'bg-slate-200 text-slate-700'}`}>{obra.status}</span>
                         </div>
                         <p className="text-xs text-slate-500">{obra.endereco}</p>
                         <div className="text-xs space-y-1 pt-2 border-t border-slate-100">
                           <p><span className="text-slate-400">Responsável:</span> <strong>{obra.responsavel}</strong></p>
-                          <p><span className="text-slate-400">Prazo:</span> {obra.inicio} até {obra.previsao}</p>
+                          <p><span className="text-slate-400">Prazo:</span> {fmtData(obra.inicio)} até {fmtData(obra.previsao)}</p>
                           <p><span className="text-slate-400">Orçamento:</span> <strong className="text-slate-900">{formatBRL(obra.orcamento)}</strong></p>
                         </div>
+                        {can('obra.gerir') && (
+                          <div className="pt-2 border-t border-slate-100 flex justify-end no-print">
+                            <BtnAcao onClick={() => abrirObra(obra)}>Editar</BtnAcao>
+                            <BtnAcao perigo onClick={() => excluirObra(obra)}>Excluir</BtnAcao>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {activeTab === 'compras' && (
+              {aba === 'compras' && (
                 <div className="space-y-6">
                   <div className="flex justify-between items-center">
                     <h3 className="font-bold text-slate-800">Solicitações e Pedidos de Compra</h3>
-                    <button onClick={() => setNovaCompraModal(true)} className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
-                      <Icon name="plus" className="w-4 h-4" /> Nova Solicitação de Compra
-                    </button>
+                    {can('compra.criar') && (
+                      <button onClick={() => abrirCompra(null)} className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                        <Icon name="plus" className="w-4 h-4" /> Nova Solicitação de Compra
+                      </button>
+                    )}
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
@@ -636,17 +844,23 @@
                               <td className="px-6 py-3 text-xs">{forn?.nome}</td>
                               <td className="px-6 py-3">{c.qtd} {mat?.unidade}</td>
                               <td className="px-6 py-3 font-bold">{formatBRL(c.qtd * c.precoUnit)}</td>
-                              <td className="px-6 py-3 text-xs">{c.entrega}</td>
+                              <td className="px-6 py-3 text-xs whitespace-nowrap">{fmtData(c.entrega)}</td>
                               <td className="px-6 py-3">
-                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.status === 'Entregue' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.status === 'Entregue' ? 'bg-emerald-100 text-emerald-800' : c.status === 'Cancelado' ? 'bg-slate-200 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>
                                   {c.status}
                                 </span>
                               </td>
-                              <td className="px-6 py-3">
-                                {c.status !== 'Entregue' && (
-                                  <button onClick={() => handleConfirmarEntregaCompra(c)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-2.5 py-1 rounded">
-                                    Confirmar Entrega
-                                  </button>
+                              <td className="px-6 py-3 whitespace-nowrap">
+                                {c.status !== 'Entregue' && c.status !== 'Cancelado' && (
+                                  <>
+                                    {can('compra.receber') && (
+                                      <button onClick={() => handleConfirmarEntregaCompra(c)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-2.5 py-1 rounded mr-1">
+                                        Confirmar Entrega
+                                      </button>
+                                    )}
+                                    {can('compra.editar') && <BtnAcao onClick={() => abrirCompra(c)}>Editar</BtnAcao>}
+                                    {can('compra.editar') && <BtnAcao perigo onClick={() => cancelarCompra(c)}>Cancelar</BtnAcao>}
+                                  </>
                                 )}
                               </td>
                             </tr>
@@ -671,7 +885,7 @@
                 </div>
               )}
 
-              {activeTab === 'financeiro' && (
+              {aba === 'financeiro' && (
                 <div className="space-y-6">
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div className="bg-white p-4 rounded-2xl border border-slate-200">
@@ -688,11 +902,13 @@
                     </div>
                   </div>
 
-                  <div className="flex justify-end">
-                    <button onClick={() => setNovaDespesaModal(true)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
-                      <Icon name="plus" className="w-4 h-4" /> Lançar Despesa
-                    </button>
-                  </div>
+                  {can('despesa.gerir') && (
+                    <div className="flex justify-end">
+                      <button onClick={() => abrirDespesa(null)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                        <Icon name="plus" className="w-4 h-4" /> Lançar Despesa
+                      </button>
+                    </div>
+                  )}
 
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -704,6 +920,7 @@
                           <th className="px-6 py-3">Vencimento</th>
                           <th className="px-6 py-3">Valor</th>
                           <th className="px-6 py-3">Status</th>
+                          {can('despesa.gerir') && <th className="px-6 py-3 no-print">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -712,10 +929,12 @@
                             <td className="px-6 py-3 font-bold">{getObraNome(d.obraId)}</td>
                             <td className="px-6 py-3">{d.descricao}</td>
                             <td className="px-6 py-3 text-xs">{d.categoria}</td>
-                            <td className="px-6 py-3 text-xs">{d.vencimento}</td>
+                            <td className="px-6 py-3 text-xs whitespace-nowrap">{fmtData(d.vencimento)}</td>
                             <td className="px-6 py-3 font-bold">{formatBRL(d.valor)}</td>
                             <td className="px-6 py-3">
                               <button
+                                disabled={!can('despesa.gerir')}
+                                title="Clique para alternar entre Pago / A pagar"
                                 onClick={() => setData(prev => ({
                                   ...prev,
                                   despesas: prev.despesas.map(item => item.id === d.id ? { ...item, status: item.status === 'Pago' ? 'A pagar' : 'Pago' } : item)
@@ -725,6 +944,12 @@
                                 {d.status}
                               </button>
                             </td>
+                            {can('despesa.gerir') && (
+                              <td className="px-6 py-3 no-print whitespace-nowrap">
+                                <BtnAcao onClick={() => abrirDespesa(d)}>Editar</BtnAcao>
+                                <BtnAcao perigo onClick={() => excluirDespesa(d)}>Excluir</BtnAcao>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -733,13 +958,15 @@
                 </div>
               )}
 
-              {activeTab === 'funcionarios' && (
+              {aba === 'funcionarios' && (
                 <div className="space-y-4">
                   <div className="flex justify-between items-center">
                     <h3 className="font-bold text-slate-800">Equipe e Folha de Presença Diária</h3>
-                    <button onClick={() => setNovoFuncModal(true)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
-                      <Icon name="plus" className="w-4 h-4" /> Cadastrar Funcionário
-                    </button>
+                    {can('func.gerir') && (
+                      <button onClick={() => abrirFuncionario(null)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                        <Icon name="plus" className="w-4 h-4" /> Cadastrar Funcionário
+                      </button>
+                    )}
                   </div>
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -749,6 +976,7 @@
                           <th className="px-6 py-3">Função</th>
                           <th className="px-6 py-3">Obra Alocada</th>
                           <th className="px-6 py-3">Presença Hoje</th>
+                          {can('func.gerir') && <th className="px-6 py-3 no-print">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -759,6 +987,7 @@
                             <td className="px-6 py-3 font-medium">{getObraNome(f.obraId)}</td>
                             <td className="px-6 py-3">
                               <select
+                                disabled={!can('func.presenca')}
                                 value={f.presenca}
                                 onChange={e => setData(prev => ({
                                   ...prev,
@@ -771,6 +1000,12 @@
                                 <option value="Atestado">Atestado</option>
                               </select>
                             </td>
+                            {can('func.gerir') && (
+                              <td className="px-6 py-3 no-print whitespace-nowrap">
+                                <BtnAcao onClick={() => abrirFuncionario(f)}>Editar</BtnAcao>
+                                <BtnAcao perigo onClick={() => excluirFuncionario(f)}>Excluir</BtnAcao>
+                              </td>
+                            )}
                           </tr>
                         ))}
                       </tbody>
@@ -779,7 +1014,7 @@
                 </div>
               )}
 
-              {activeTab === 'relatorios' && (
+              {aba === 'relatorios' && (
                 <div className="space-y-6">
                   <div className="flex justify-between items-center no-print">
                     <h3 className="font-bold text-slate-800">Relatório Gerencial Consolidado</h3>
@@ -807,10 +1042,10 @@
                     <div className="bg-white p-5 rounded-2xl border border-slate-200">
                       <h4 className="font-bold text-slate-900 mb-3">2. Compras Pendentes de Entrega</h4>
                       <ul className="space-y-2 text-sm">
-                        {comprasVisiveis.filter(c => c.status !== 'Entregue').map(c => (
+                        {comprasVisiveis.filter(c => c.status !== 'Entregue' && c.status !== 'Cancelado').map(c => (
                           <li key={c.id} className="flex justify-between border-b border-slate-100 pb-1.5">
                             <span>{getMat(c.materialId)?.nome} ({getObraNome(c.obraId)})</span>
-                            <span className="font-bold">{c.qtd} un • Prev: {c.entrega}</span>
+                            <span className="font-bold">{c.qtd} {getMat(c.materialId)?.unidade} • Prev: {fmtData(c.entrega)}</span>
                           </li>
                         ))}
                       </ul>
@@ -855,7 +1090,7 @@
 
                   <div>
                     <label className="block font-bold text-xs uppercase text-slate-500 mb-1">Quantidade</label>
-                    <input type="number" min="1" value={movForm.qtd} onChange={e => setMovForm({ ...movForm, qtd: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2" required />
+                    <input type="number" min="0.01" step="any" value={movForm.qtd} onChange={e => setMovForm({ ...movForm, qtd: e.target.value })} className="w-full border border-slate-300 rounded-lg px-3 py-2" required />
                   </div>
 
                   <div>
@@ -880,22 +1115,28 @@
           {novoMatModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
-                <h3 className="text-lg font-extrabold">Cadastrar Novo Material</h3>
+                <h3 className="text-lg font-extrabold">{novoMatForm.id ? 'Editar Material' : 'Cadastrar Novo Material'}</h3>
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  const estoques = {};
-                  data.obras.forEach(o => estoques[o.id] = 0);
-                  setData(prev => ({
-                    ...prev,
-                    materiais: [...prev.materiais, { id: 'm' + Date.now(), ...novoMatForm, min: Number(novoMatForm.min), estoques }]
-                  }));
+                  const codigo = novoMatForm.codigo.trim();
+                  if (data.materiais.some(m => m.codigo.toLowerCase() === codigo.toLowerCase() && m.id !== novoMatForm.id)) {
+                    return alert(`Já existe um material com o código ${codigo}.`);
+                  }
+                  const campos = { codigo, nome: novoMatForm.nome.trim(), unidade: novoMatForm.unidade.trim(), min: Number(novoMatForm.min) };
+                  if (novoMatForm.id) {
+                    setData(prev => ({ ...prev, materiais: prev.materiais.map(m => m.id === novoMatForm.id ? { ...m, ...campos } : m) }));
+                  } else {
+                    const estoques = {};
+                    data.obras.forEach(o => estoques[o.id] = 0);
+                    setData(prev => ({ ...prev, materiais: [...prev.materiais, { id: novoId('m'), ...campos, estoques }] }));
+                  }
                   setNovoMatModal(false);
                 }} className="space-y-3 text-sm">
                   <input type="text" placeholder="Código (ex: MAT-006)" value={novoMatForm.codigo} onChange={e => setNovoMatForm({ ...novoMatForm, codigo: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Nome do Material" value={novoMatForm.nome} onChange={e => setNovoMatForm({ ...novoMatForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <div className="grid grid-cols-2 gap-2">
                     <input type="text" placeholder="Unidade (sc, kg, un)" value={novoMatForm.unidade} onChange={e => setNovoMatForm({ ...novoMatForm, unidade: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
-                    <input type="number" placeholder="Estoque Mínimo" value={novoMatForm.min} onChange={e => setNovoMatForm({ ...novoMatForm, min: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                    <input type="number" min="0" step="any" placeholder="Estoque Mínimo" value={novoMatForm.min} onChange={e => setNovoMatForm({ ...novoMatForm, min: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   </div>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovoMatModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
@@ -909,24 +1150,43 @@
           {novaObraModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
-                <h3 className="text-lg font-extrabold">Cadastrar Nova Obra</h3>
+                <h3 className="text-lg font-extrabold">{novaObraForm.id ? 'Editar Obra' : 'Cadastrar Nova Obra'}</h3>
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  const newId = 'ob' + Date.now();
-                  setData(prev => ({
-                    ...prev,
-                    obras: [...prev.obras, { id: newId, ...novaObraForm, orcamento: Number(novaObraForm.orcamento), status: 'Em andamento' }],
-                    materiais: prev.materiais.map(m => ({ ...m, estoques: { ...m.estoques, [newId]: 0 } }))
-                  }));
+                  if (novaObraForm.previsao < novaObraForm.inicio) return alert('A previsão de término não pode ser anterior ao início.');
+                  const campos = { ...novaObraForm, orcamento: Number(novaObraForm.orcamento) };
+                  if (novaObraForm.id) {
+                    setData(prev => ({ ...prev, obras: prev.obras.map(o => o.id === novaObraForm.id ? { ...o, ...campos } : o) }));
+                  } else {
+                    const newId = novoId('ob');
+                    setData(prev => ({
+                      ...prev,
+                      obras: [...prev.obras, { ...campos, id: newId }],
+                      materiais: prev.materiais.map(m => ({ ...m, estoques: { ...m.estoques, [newId]: 0 } }))
+                    }));
+                  }
                   setNovaObraModal(false);
                 }} className="space-y-3 text-sm">
                   <input type="text" placeholder="Nome da Obra" value={novaObraForm.nome} onChange={e => setNovaObraForm({ ...novaObraForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Endereço Completo" value={novaObraForm.endereco} onChange={e => setNovaObraForm({ ...novaObraForm, endereco: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Engenheiro / Mestre Responsável" value={novaObraForm.responsavel} onChange={e => setNovaObraForm({ ...novaObraForm, responsavel: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
-                  <input type="number" placeholder="Orçamento Previsto (R$)" value={novaObraForm.orcamento} onChange={e => setNovaObraForm({ ...novaObraForm, orcamento: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                  <input type="number" min="0" step="0.01" placeholder="Orçamento Previsto (R$)" value={novaObraForm.orcamento} onChange={e => setNovaObraForm({ ...novaObraForm, orcamento: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs font-bold uppercase text-slate-500">Início
+                      <input type="date" value={novaObraForm.inicio} onChange={e => setNovaObraForm({ ...novaObraForm, inicio: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900 normal-case" required />
+                    </label>
+                    <label className="text-xs font-bold uppercase text-slate-500">Previsão de término
+                      <input type="date" value={novaObraForm.previsao} onChange={e => setNovaObraForm({ ...novaObraForm, previsao: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900 normal-case" required />
+                    </label>
+                  </div>
+                  <select value={novaObraForm.status} onChange={e => setNovaObraForm({ ...novaObraForm, status: e.target.value })} className="w-full border rounded-lg px-3 py-2">
+                    <option value="Em andamento">Em andamento</option>
+                    <option value="Paralisada">Paralisada</option>
+                    <option value="Concluída">Concluída</option>
+                  </select>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovaObraModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Cadastrar</button>
+                    <button type="submit" className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">{novaObraForm.id ? 'Salvar' : 'Cadastrar'}</button>
                   </div>
                 </form>
               </div>
@@ -936,13 +1196,17 @@
           {novaCompraModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
-                <h3 className="text-lg font-extrabold">Nova Solicitação de Compra</h3>
+                <h3 className="text-lg font-extrabold">{novaCompraForm.id ? 'Editar Solicitação de Compra' : 'Nova Solicitação de Compra'}</h3>
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  setData(prev => ({
-                    ...prev,
-                    compras: [{ id: 'c' + Date.now(), ...novaCompraForm, qtd: Number(novaCompraForm.qtd), precoUnit: Number(novaCompraForm.precoUnit), status: 'Solicitado' }, ...prev.compras]
-                  }));
+                  const qtd = Number(novaCompraForm.qtd), precoUnit = Number(novaCompraForm.precoUnit);
+                  if (!(qtd > 0) || !(precoUnit >= 0)) return alert('Informe quantidade e preço válidos.');
+                  const campos = { ...novaCompraForm, qtd, precoUnit };
+                  if (novaCompraForm.id) {
+                    setData(prev => ({ ...prev, compras: prev.compras.map(c => c.id === novaCompraForm.id ? { ...c, ...campos } : c) }));
+                  } else {
+                    setData(prev => ({ ...prev, compras: [{ ...campos, id: novoId('c'), status: 'Solicitado', solicitante: user.nome, dataSolicitacao: hojeISO() }, ...prev.compras] }));
+                  }
                   setNovaCompraModal(false);
                 }} className="space-y-3 text-sm">
                   <select value={novaCompraForm.obraId} onChange={e => setNovaCompraForm({ ...novaCompraForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
@@ -955,13 +1219,13 @@
                     {data.fornecedores.map(f => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
                   <div className="grid grid-cols-2 gap-2">
-                    <input type="number" placeholder="Quantidade" value={novaCompraForm.qtd} onChange={e => setNovaCompraForm({ ...novaCompraForm, qtd: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
-                    <input type="number" step="0.01" placeholder="Preço Unit. (R$)" value={novaCompraForm.precoUnit} onChange={e => setNovaCompraForm({ ...novaCompraForm, precoUnit: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                    <input type="number" min="0.01" step="any" placeholder="Quantidade" value={novaCompraForm.qtd} onChange={e => setNovaCompraForm({ ...novaCompraForm, qtd: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                    <input type="number" min="0" step="0.01" placeholder="Preço Unit. (R$)" value={novaCompraForm.precoUnit} onChange={e => setNovaCompraForm({ ...novaCompraForm, precoUnit: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   </div>
                   <input type="date" value={novaCompraForm.entrega} onChange={e => setNovaCompraForm({ ...novaCompraForm, entrega: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovaCompraModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 bg-amber-500 text-slate-950 rounded-lg font-bold">Solicitar</button>
+                    <button type="submit" className="px-4 py-2 bg-amber-500 text-slate-950 rounded-lg font-bold">{novaCompraForm.id ? 'Salvar' : 'Solicitar'}</button>
                   </div>
                 </form>
               </div>
@@ -971,13 +1235,17 @@
           {novaDespesaModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
-                <h3 className="text-lg font-extrabold">Lançar Despesa</h3>
+                <h3 className="text-lg font-extrabold">{novaDespesaForm.id ? 'Editar Despesa' : 'Lançar Despesa'}</h3>
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  setData(prev => ({
-                    ...prev,
-                    despesas: [{ id: 'd' + Date.now(), ...novaDespesaForm, valor: Number(novaDespesaForm.valor) }, ...prev.despesas]
-                  }));
+                  const valor = Number(novaDespesaForm.valor);
+                  if (!(valor > 0)) return alert('Informe um valor maior que zero.');
+                  const campos = { ...novaDespesaForm, valor };
+                  if (novaDespesaForm.id) {
+                    setData(prev => ({ ...prev, despesas: prev.despesas.map(d => d.id === novaDespesaForm.id ? { ...d, ...campos } : d) }));
+                  } else {
+                    setData(prev => ({ ...prev, despesas: [{ ...campos, id: novoId('d') }, ...prev.despesas] }));
+                  }
                   setNovaDespesaModal(false);
                 }} className="space-y-3 text-sm">
                   <select value={novaDespesaForm.obraId} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
@@ -990,8 +1258,12 @@
                     <option value="Equipamentos">Equipamentos</option>
                     <option value="Outros">Outros</option>
                   </select>
-                  <input type="number" step="0.01" placeholder="Valor (R$)" value={novaDespesaForm.valor} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, valor: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                  <input type="number" min="0.01" step="0.01" placeholder="Valor (R$)" value={novaDespesaForm.valor} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, valor: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="date" value={novaDespesaForm.vencimento} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, vencimento: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                  <select value={novaDespesaForm.status} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, status: e.target.value })} className="w-full border rounded-lg px-3 py-2">
+                    <option value="A pagar">A pagar</option>
+                    <option value="Pago">Pago</option>
+                  </select>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovaDespesaModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
                     <button type="submit" className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
@@ -1004,13 +1276,14 @@
           {novoFuncModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
-                <h3 className="text-lg font-extrabold">Cadastrar Funcionário</h3>
+                <h3 className="text-lg font-extrabold">{novoFuncForm.id ? 'Editar Funcionário' : 'Cadastrar Funcionário'}</h3>
                 <form onSubmit={(e) => {
                   e.preventDefault();
-                  setData(prev => ({
-                    ...prev,
-                    funcionarios: [...prev.funcionarios, { id: 'fn' + Date.now(), ...novoFuncForm, presenca: 'Presente' }]
-                  }));
+                  if (novoFuncForm.id) {
+                    setData(prev => ({ ...prev, funcionarios: prev.funcionarios.map(f => f.id === novoFuncForm.id ? { ...f, ...novoFuncForm } : f) }));
+                  } else {
+                    setData(prev => ({ ...prev, funcionarios: [...prev.funcionarios, { ...novoFuncForm, id: novoId('fn'), presenca: 'Presente' }] }));
+                  }
                   setNovoFuncModal(false);
                 }} className="space-y-3 text-sm">
                   <input type="text" placeholder="Nome Completo" value={novoFuncForm.nome} onChange={e => setNovoFuncForm({ ...novoFuncForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
