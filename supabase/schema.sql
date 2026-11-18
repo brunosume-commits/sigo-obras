@@ -37,25 +37,36 @@ returns boolean language sql stable security definer set search_path = public as
   select coalesce(public.meu_perfil() = any(perfis_permitidos), false)
 $$;
 
+-- E-mails que entram automaticamente como Engenheiro (administrador), já liberados.
+-- Tabela sem políticas de RLS: invisível pela API do site.
+-- Para cadastrar o seu: insert into public.administradores (email) values ('seu@email.com');
+create table public.administradores (email text primary key);
+alter table public.administradores enable row level security;
+revoke all on public.administradores from anon, authenticated;
+
 -- Cria o perfil automaticamente quando um usuário é cadastrado.
--- O PRIMEIRO usuário vira Engenheiro (administrador) e já entra ativo.
+-- E-mail listado em "administradores" vira Engenheiro já liberado.
+-- Se a lista estiver vazia, o PRIMEIRO usuário vira Engenheiro.
 -- Os demais começam como Mestre de Obras, INATIVOS, até o Engenheiro
 -- liberar e escolher o perfil na tela "Usuários".
 create or replace function public.criar_perfil_novo_usuario()
 returns trigger language plpgsql security definer set search_path = public as $$
+declare v_admin boolean; v_primeiro boolean;
 begin
-  -- trava simples para dois cadastros simultâneos não virarem "primeiro usuário"
   perform pg_advisory_xact_lock(hashtext('sigo_primeiro_usuario'));
+  v_admin := exists (select 1 from public.administradores where lower(email) = lower(new.email));
+  v_primeiro := not exists (select 1 from public.perfis) and not exists (select 1 from public.administradores);
   insert into public.perfis (id, nome, email, perfil, ativo)
   values (
     new.id,
     coalesce(nullif(trim(new.raw_user_meta_data->>'nome'), ''), split_part(new.email, '@', 1)),
     new.email,
-    case when exists (select 1 from public.perfis) then 'Mestre de Obras' else 'Engenheiro' end,
-    not exists (select 1 from public.perfis)   -- só o primeiro já entra ativo
+    case when v_admin or v_primeiro then 'Engenheiro' else 'Mestre de Obras' end,
+    v_admin or v_primeiro
   );
   return new;
 end $$;
+revoke all on function public.criar_perfil_novo_usuario() from public, anon, authenticated;
 
 create trigger trg_criar_perfil
   after insert on auth.users
@@ -116,7 +127,7 @@ create table public.estoques (
 
 -- Não deixa excluir obra ou material que ainda tenha saldo
 create or replace function public.bloquear_exclusao_com_saldo()
-returns trigger language plpgsql as $$
+returns trigger language plpgsql set search_path = public as $$
 begin
   if exists (select 1 from public.estoques where saldo > 0 and
              ((tg_table_name = 'obras' and obra_id = old.id) or (tg_table_name = 'materiais' and material_id = old.id))) then
@@ -343,6 +354,10 @@ begin
 end $$;
 
 -- Funções só para usuários logados
+revoke all on function public.meu_perfil() from public, anon;
+revoke all on function public.tem_perfil(text[]) from public, anon;
+grant execute on function public.meu_perfil() to authenticated;
+grant execute on function public.tem_perfil(text[]) to authenticated;
 revoke all on function public.registrar_movimentacao(text, uuid, uuid, uuid, numeric, text, text) from public, anon;
 revoke all on function public.estornar_movimentacao(uuid) from public, anon;
 revoke all on function public.receber_compra(uuid) from public, anon;
