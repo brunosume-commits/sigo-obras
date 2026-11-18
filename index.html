@@ -44,6 +44,9 @@
         arrowUp: <><line x1="12" x2="12" y1="19" y2="5"/><polyline points="5 12 12 5 19 12"/></>,
         transfer: <><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></>,
         logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></>,
+        search: <><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></>,
+        chevronLeft: <><polyline points="15 18 9 12 15 6"/></>,
+        chevronRight: <><polyline points="9 18 15 12 9 6"/></>,
         print: <><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></>
       };
       return (
@@ -69,6 +72,37 @@
     const hojeISO = () => isoLocal(new Date());
     const somaDias = (dias) => { const d = new Date(); d.setDate(d.getDate() + dias); return isoLocal(d); };
     const fmtData = (iso) => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) + iso.slice(10) : (iso || '-');
+    const CATEGORIAS_PADRAO = ['Cimentos e argamassas', 'Agregados', 'Alvenaria', 'Aço e ferragens', 'Hidráulica', 'Elétrica', 'Acabamentos', 'Madeiras', 'Ferramentas e EPI', 'Geral'];
+    const NOMES_MES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+    const diasDoMes = (mes) => { const [a, m] = mes.split('-').map(Number); return new Date(a, m, 0).getDate(); };
+    const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+    // Gráfico de barras horizontais simples (sem biblioteca)
+    const BarrasH = ({ itens, formato = (v) => v, vazio = 'Sem dados para exibir.' }) => {
+      const max = Math.max(1, ...itens.flatMap(i => (i.series || [{ valor: i.valor }]).map(x => Number(x.valor) || 0)));
+      if (!itens.length) return <p className="text-sm text-slate-400">{vazio}</p>;
+      return (
+        <div className="space-y-3">
+          {itens.map((i, idx) => (
+            <div key={idx}>
+              <div className="flex justify-between text-xs mb-1 gap-2">
+                <span className="font-bold text-slate-700 truncate">{i.rotulo}</span>
+                {!i.series && <span className="text-slate-600 font-semibold whitespace-nowrap">{formato(i.valor)}</span>}
+              </div>
+              {(i.series || [{ valor: i.valor, cor: i.cor || 'bg-amber-500' }]).map((sr, k) => (
+                <div key={k} className="flex items-center gap-2 mb-1">
+                  <div className="flex-1 bg-slate-100 h-3 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${sr.cor}`} style={{ width: `${Math.max(0, (Number(sr.valor) || 0) / max * 100)}%` }}></div>
+                  </div>
+                  {i.series && <span className="text-[11px] text-slate-600 w-32 text-right whitespace-nowrap">{sr.nome}: <strong>{formato(sr.valor)}</strong></span>}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
+      );
+    };
+
     const proximoCodigo = (materiais) => {
       const max = materiais.reduce((acc, m) => {
         const n = parseInt(String(m.codigo || '').replace(/\D/g, ''), 10);
@@ -100,7 +134,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -118,7 +152,9 @@
       return data;
     };
 
-    async function carregarDados(perfil) {
+    async function carregarDados(perfil, mesPresenca) {
+      const iniMes = mesPresenca + '-01';
+      const fimMes = mesPresenca + '-' + pad2(diasDoMes(mesPresenca));
       const consultas = [
         sb.from('obras').select('*').order('criado_em'),
         sb.from('materiais').select('*').order('codigo'),
@@ -129,14 +165,15 @@
         sb.from('funcionarios').select('*').order('nome'),
         perfil === 'Engenheiro' ? sb.from('despesas').select('*').order('vencimento', { ascending: false }) : Promise.resolve({ data: [] }),
         perfil === 'Engenheiro' ? sb.from('perfis').select('*').order('criado_em') : Promise.resolve({ data: [] }),
+        sb.from('presencas').select('funcionario_id, dia, status').gte('dia', iniMes).lte('dia', fimMes),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas] = (await Promise.all(consultas)).map(ok);
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
         materiais: materiais.map(m => {
           const est = {};
           estoques.filter(e => e.material_id === m.id).forEach(e => { est[e.obra_id] = num(e.saldo); });
-          return { id: m.id, codigo: m.codigo, nome: m.nome, unidade: m.unidade, min: num(m.estoque_minimo), estoques: est };
+          return { id: m.id, codigo: m.codigo, nome: m.nome, categoria: m.categoria || 'Geral', unidade: m.unidade, min: num(m.estoque_minimo), estoques: est };
         }),
         movimentacoes: movs.map(m => ({
           id: m.id, data: tsLocal(m.data), tipo: m.tipo, tipoOriginal: m.tipo_original, estornoDe: m.estorno_de,
@@ -151,6 +188,7 @@
         despesas: despesas.map(d => ({ id: d.id, compraId: d.compra_id, obraId: d.obra_id, descricao: d.descricao, categoria: d.categoria, valor: num(d.valor), vencimento: d.vencimento, status: d.status })),
         funcionarios: funcs.map(f => ({ id: f.id, nome: f.nome, funcao: f.funcao, obraId: f.obra_id, presenca: f.presenca })),
         perfis,
+        presencas: presencas.map(p => ({ funcionarioId: p.funcionario_id, dia: p.dia, status: p.status })),
       };
     }
 
@@ -189,6 +227,10 @@
       const [erroConexao, setErroConexao] = useState('');
 
       const [activeTab, setActiveTab] = useState('materiais');
+      const [buscaEstoque, setBuscaEstoque] = useState('');
+      const [filtroCategoria, setFiltroCategoria] = useState('');
+      const [diaPresenca, setDiaPresenca] = useState(hojeISO());
+      const mesPresenca = diaPresenca.slice(0, 7);
       const [selectedObra, setSelectedObra] = useState('ALL');
 
       const [movModal, setMovModal] = useState(null);
@@ -276,13 +318,13 @@
       const recarregar = useCallback(async () => {
         if (!user) return;
         try {
-          setData(await carregarDados(user.perfil));
+          setData(await carregarDados(user.perfil, mesPresenca));
           setSincronizado(new Date());
           setErroConexao('');
         } catch (err) {
           setErroConexao('Não foi possível ler os dados do servidor: ' + err.message);
         }
-      }, [user?.id, user?.perfil]);
+      }, [user?.id, user?.perfil, mesPresenca]);
 
       useEffect(() => {
         if (!user) return;
@@ -309,8 +351,8 @@
 
       // ---------- Abertura de formulários (novo / editar) ----------
       const abrirMaterial = (mat) => {
-        setNovoMatForm(mat ? { id: mat.id, codigo: mat.codigo, nome: mat.nome, unidade: mat.unidade, min: mat.min }
-                           : { codigo: proximoCodigo(data.materiais), nome: '', unidade: 'un', min: 10 });
+        setNovoMatForm(mat ? { id: mat.id, codigo: mat.codigo, nome: mat.nome, categoria: mat.categoria, unidade: mat.unidade, min: mat.min }
+                           : { codigo: proximoCodigo(data.materiais), nome: '', categoria: filtroCategoria || 'Geral', unidade: 'un', min: 10 });
         setNovoMatModal(true);
       };
       const abrirObra = (obra) => {
@@ -354,7 +396,7 @@
       // ---------- Gravações ----------
       const salvarMaterial = async (e) => {
         e.preventDefault();
-        const reg = { codigo: novoMatForm.codigo.trim(), nome: novoMatForm.nome.trim(), unidade: novoMatForm.unidade.trim(), estoque_minimo: Number(novoMatForm.min) };
+        const reg = { codigo: novoMatForm.codigo.trim(), nome: novoMatForm.nome.trim(), categoria: (novoMatForm.categoria || '').trim() || 'Geral', unidade: novoMatForm.unidade.trim(), estoque_minimo: Number(novoMatForm.min) };
         if (await executar(async () => ok(novoMatForm.id
           ? await sb.from('materiais').update(reg).eq('id', novoMatForm.id)
           : await sb.from('materiais').insert(reg)))) setNovoMatModal(false);
@@ -411,8 +453,8 @@
       const alternarStatusDespesa = (d) => executar(async () =>
         ok(await sb.from('despesas').update({ status: d.status === 'Pago' ? 'A pagar' : 'Pago' }).eq('id', d.id)));
 
-      const marcarPresenca = (f, presenca) => executar(async () =>
-        ok(await sb.rpc('marcar_presenca', { p_funcionario: f.id, p_presenca: presenca })));
+      const marcarPresenca = (f, presenca, dia) => executar(async () =>
+        ok(await sb.rpc('marcar_presenca', { p_funcionario: f.id, p_presenca: presenca, p_dia: dia })));
 
       const alterarPerfilUsuario = (p, campos) => {
         if (p.id === user.id && (campos.perfil && campos.perfil !== 'Engenheiro' || campos.ativo === false)) {
@@ -590,6 +632,34 @@
       const despesasVisiveis = selectedObra === 'ALL' ? data.despesas : data.despesas.filter(d => d.obraId === selectedObra);
       const funcsVisiveis = selectedObra === 'ALL' ? data.funcionarios : data.funcionarios.filter(f => f.obraId === selectedObra);
 
+      const ordenarPt = (a, b) => a.localeCompare(b, 'pt-BR');
+      const categoriasEmUso = [...new Set(data.materiais.map(m => m.categoria))].sort(ordenarPt);
+      const categoriasMateriais = [...new Set([...CATEGORIAS_PADRAO, ...categoriasEmUso])].sort(ordenarPt);
+      const termoBusca = semAcento(buscaEstoque.trim());
+      const materiaisFiltrados = data.materiais.filter(m =>
+        (!filtroCategoria || m.categoria === filtroCategoria) &&
+        (!termoBusca || semAcento(`${m.codigo} ${m.nome} ${m.categoria}`).includes(termoBusca)));
+
+      // Presença: mapa "funcionario|dia" -> status, para o mês carregado
+      const presencaMap = {};
+      data.presencas.forEach(p => { presencaMap[p.funcionarioId + '|' + p.dia] = p.status; });
+      const hoje = hojeISO();
+      const nDiasMes = diasDoMes(mesPresenca);
+      const diasMes = Array.from({ length: nDiasMes }, (_, i) => mesPresenca + '-' + pad2(i + 1));
+      const resumoPresenca = (fid) => {
+        const r = { Presente: 0, Falta: 0, Atestado: 0 };
+        diasMes.forEach(d => { const st = presencaMap[fid + '|' + d]; if (st) r[st]++; });
+        return r;
+      };
+      const mudarMes = (delta) => {
+        const [a, m] = mesPresenca.split('-').map(Number);
+        const d = new Date(a, m - 1 + delta, 1);
+        const novoMes = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+        const novoDia = novoMes === hoje.slice(0, 7) ? hoje : novoMes + '-' + pad2(diasDoMes(novoMes));
+        if (novoDia > hoje) return;
+        setDiaPresenca(novoDia);
+      };
+
       const totalOrcado = obrasVisiveis.reduce((acc, o) => acc + Number(o.orcamento), 0);
       const totalGasto = despesasVisiveis.reduce((acc, d) => acc + Number(d.valor), 0);
       const totalMateriaisGasto = despesasVisiveis.filter(d => d.categoria === 'Material').reduce((acc, d) => acc + Number(d.valor), 0);
@@ -730,9 +800,24 @@
                   </div>
 
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-                    <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-                      <h3 className="font-bold text-slate-800">Posição de Estoque por Obra</h3>
-                      <span className="text-xs text-slate-400">Itens em vermelho atingiram o estoque mínimo</span>
+                    <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800">Posição de Estoque por Obra</h3>
+                        <span className="text-xs text-slate-400">Itens em vermelho atingiram o estoque mínimo</span>
+                      </div>
+                      <div className="no-print flex flex-wrap gap-2 w-full sm:w-auto">
+                        <div className="relative flex-1 sm:w-64">
+                          <Icon name="search" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input type="search" value={buscaEstoque} onChange={e => setBuscaEstoque(e.target.value)}
+                            placeholder="Buscar por nome, código ou categoria"
+                            className="w-full border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+                        </div>
+                        <select value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)}
+                          className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:border-amber-500">
+                          <option value="">Todas as categorias</option>
+                          {categoriasEmUso.map(c => <option key={c} value={c}>{c}</option>)}
+                        </select>
+                      </div>
                     </div>
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm text-left">
@@ -740,6 +825,7 @@
                           <tr>
                             <th className="px-6 py-3">Código</th>
                             <th className="px-6 py-3">Material</th>
+                            <th className="px-6 py-3">Categoria</th>
                             <th className="px-6 py-3">Mínimo</th>
                             {obrasVisiveis.map(o => (
                               <th key={o.id} className="px-6 py-3">{o.nome}</th>
@@ -749,12 +835,18 @@
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
-                          {data.materiais.map(mat => {
+                          {materiaisFiltrados.length === 0 && (
+                            <tr><td colSpan={5 + obrasVisiveis.length} className="px-6 py-8 text-center text-sm text-slate-400">
+                              {data.materiais.length ? 'Nenhum material encontrado com esses filtros.' : 'Nenhum material cadastrado ainda.'}
+                            </td></tr>
+                          )}
+                          {materiaisFiltrados.map(mat => {
                             const totalGeral = data.obras.reduce((sum, o) => sum + (mat.estoques[o.id] || 0), 0);
                             return (
                               <tr key={mat.id} className="hover:bg-slate-50">
                                 <td className="px-6 py-3.5 font-mono text-xs text-slate-500">{mat.codigo}</td>
                                 <td className="px-6 py-3.5 font-bold text-slate-800">{mat.nome}</td>
+                                <td className="px-6 py-3.5"><span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded">{mat.categoria}</span></td>
                                 <td className="px-6 py-3.5 text-slate-500">{mat.min} {mat.unidade}</td>
                                 {obrasVisiveis.map(o => {
                                   const saldo = mat.estoques[o.id] || 0;
@@ -862,26 +954,62 @@
                     </div>
                   </div>
 
-                  <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                    <h3 className="font-bold text-slate-800">Comparativo Orçamento vs. Gastos por Obra</h3>
-                    <div className="space-y-4">
-                      {obrasVisiveis.map(obra => {
-                        const gastoObra = data.despesas.filter(d => d.obraId === obra.id).reduce((s, d) => s + Number(d.valor), 0);
-                        const pct = Number(obra.orcamento) > 0 ? Math.min(100, (gastoObra / Number(obra.orcamento)) * 100) : 0;
-                        return (
-                          <div key={obra.id} className="space-y-1.5">
-                            <div className="flex justify-between text-sm">
-                              <span className="font-bold text-slate-800">{obra.nome}</span>
-                              <span className="text-slate-600">
-                                <strong>{formatBRL(gastoObra)}</strong> de {formatBRL(obra.orcamento)} ({pct.toFixed(1)}%)
-                              </span>
-                            </div>
-                            <div className="w-full bg-slate-100 h-3 rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${pct > 85 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: `${pct}%` }}></div>
-                            </div>
-                          </div>
-                        );
-                      })}
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                      <h3 className="font-bold text-slate-800">Orçamento x Gasto por Obra</h3>
+                      <BarrasH formato={formatBRL} vazio="Nenhuma obra cadastrada."
+                        itens={obrasVisiveis.map(obra => {
+                          const gasto = data.despesas.filter(d => d.obraId === obra.id).reduce((s, d) => s + Number(d.valor), 0);
+                          const pct = Number(obra.orcamento) > 0 ? gasto / Number(obra.orcamento) * 100 : 0;
+                          return {
+                            rotulo: `${obra.nome} — ${pct.toFixed(1)}% usado`,
+                            series: [
+                              { nome: 'Orçado', valor: Number(obra.orcamento), cor: 'bg-slate-400' },
+                              { nome: 'Gasto', valor: gasto, cor: pct > 85 ? 'bg-red-500' : 'bg-amber-500' },
+                            ]
+                          };
+                        })} />
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                      <h3 className="font-bold text-slate-800">Despesas por Categoria</h3>
+                      <BarrasH formato={formatBRL} vazio="Nenhuma despesa lançada."
+                        itens={Object.entries(despesasVisiveis.reduce((acc, d) => { acc[d.categoria] = (acc[d.categoria] || 0) + Number(d.valor); return acc; }, {}))
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([cat, v]) => ({ rotulo: cat, valor: v, cor: 'bg-amber-500' }))} />
+                      <div className="pt-3 border-t border-slate-100 grid grid-cols-2 gap-3 text-sm">
+                        <div><p className="text-xs text-slate-400 font-bold uppercase">Pago</p><p className="font-black text-emerald-600">{formatBRL(despesasVisiveis.filter(d => d.status === 'Pago').reduce((s, d) => s + Number(d.valor), 0))}</p></div>
+                        <div><p className="text-xs text-slate-400 font-bold uppercase">A pagar</p><p className="font-black text-red-600">{formatBRL(despesasVisiveis.filter(d => d.status !== 'Pago').reduce((s, d) => s + Number(d.valor), 0))}</p></div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                      <h3 className="font-bold text-slate-800">Estoque por Categoria <span className="text-xs font-normal text-slate-400">(itens no limite / total de itens)</span></h3>
+                      <BarrasH vazio="Nenhum material cadastrado."
+                        itens={categoriasEmUso.map(cat => {
+                          const mats = data.materiais.filter(m => m.categoria === cat);
+                          const criticos = alertasEstoque.filter(a => a.mat.categoria === cat).map(a => a.mat.id);
+                          return {
+                            rotulo: `${cat} — ${new Set(criticos).size} de ${mats.length} no limite`,
+                            series: [
+                              { nome: 'Itens', valor: mats.length, cor: 'bg-emerald-500' },
+                              { nome: 'No limite', valor: new Set(criticos).size, cor: 'bg-red-500' },
+                            ]
+                          };
+                        })} />
+                    </div>
+
+                    <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+                      <h3 className="font-bold text-slate-800">Presença da Equipe Hoje</h3>
+                      {(() => {
+                        const contagem = { Presente: 0, Falta: 0, Atestado: 0, 'Sem registro': 0 };
+                        funcsVisiveis.forEach(f => { contagem[presencaMap[f.id + '|' + hoje] || 'Sem registro']++; });
+                        const cores = { Presente: 'bg-emerald-500', Falta: 'bg-red-500', Atestado: 'bg-blue-500', 'Sem registro': 'bg-slate-300' };
+                        return <BarrasH vazio="Nenhum funcionário cadastrado."
+                          itens={funcsVisiveis.length ? Object.entries(contagem).map(([k, v]) => ({ rotulo: k, valor: v, cor: cores[k] })) : []}
+                          formato={(v) => `${v} pessoa(s)`} />;
+                      })()}
+                      {mesPresenca !== hoje.slice(0, 7) && <p className="text-xs text-slate-400">Abra a aba Funcionários no mês atual para atualizar este quadro.</p>}
                     </div>
                   </div>
                 </div>
@@ -1079,54 +1207,127 @@
               )}
 
               {aba === 'funcionarios' && (
-                <div className="space-y-4">
-                  <div className="flex justify-between items-center">
-                    <h3 className="font-bold text-slate-800">Equipe e Folha de Presença Diária</h3>
+                <div className="space-y-6">
+                  <div className="flex flex-wrap justify-between items-center gap-3">
+                    <h3 className="font-bold text-slate-800">Equipe e Folha de Presença</h3>
                     {can('func.gerir') && (
-                      <button onClick={() => abrirFuncionario(null)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                      <button onClick={() => abrirFuncionario(null)} className="no-print bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
                         <Icon name="plus" className="w-4 h-4" /> Cadastrar Funcionário
                       </button>
                     )}
                   </div>
+
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                    <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-slate-800">Registro de presença</h4>
+                        <p className="text-xs text-slate-400">Escolha o dia e marque a situação de cada funcionário.</p>
+                      </div>
+                      <label className="no-print flex items-center gap-2 text-xs font-bold uppercase text-slate-500">Dia
+                        <input type="date" value={diaPresenca} max={hoje} onChange={e => e.target.value && e.target.value <= hoje && setDiaPresenca(e.target.value)}
+                          className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-800 normal-case" />
+                        {diaPresenca !== hoje && <button type="button" onClick={() => setDiaPresenca(hoje)} className="text-xs font-bold text-amber-700 hover:underline normal-case">Hoje</button>}
+                      </label>
+                    </div>
                     <table className="w-full text-sm text-left">
                       <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
                         <tr>
                           <th className="px-6 py-3">Nome</th>
                           <th className="px-6 py-3">Função</th>
                           <th className="px-6 py-3">Obra Alocada</th>
-                          <th className="px-6 py-3">Presença Hoje</th>
+                          <th className="px-6 py-3">Presença em {fmtData(diaPresenca)}</th>
                           {can('func.gerir') && <th className="px-6 py-3 no-print">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {funcsVisiveis.map(f => (
-                          <tr key={f.id}>
-                            <td className="px-6 py-3 font-bold text-slate-800">{f.nome}</td>
-                            <td className="px-6 py-3 text-slate-600">{f.funcao}</td>
-                            <td className="px-6 py-3 font-medium">{getObraNome(f.obraId)}</td>
-                            <td className="px-6 py-3">
-                              <select
-                                disabled={!can('func.presenca')}
-                                value={f.presenca}
-                                onChange={e => marcarPresenca(f, e.target.value)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${f.presenca === 'Presente' ? 'bg-emerald-50 text-emerald-800 border-emerald-200' : 'bg-red-50 text-red-800 border-red-200'}`}
-                              >
-                                <option value="Presente">Presente</option>
-                                <option value="Falta">Falta</option>
-                                <option value="Atestado">Atestado</option>
-                              </select>
-                            </td>
-                            {can('func.gerir') && (
-                              <td className="px-6 py-3 no-print whitespace-nowrap">
-                                <BtnAcao onClick={() => abrirFuncionario(f)}>Editar</BtnAcao>
-                                <BtnAcao perigo onClick={() => excluirFuncionario(f)}>Excluir</BtnAcao>
+                        {funcsVisiveis.length === 0 && (
+                          <tr><td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-400">Nenhum funcionário cadastrado.</td></tr>
+                        )}
+                        {funcsVisiveis.map(f => {
+                          const st = presencaMap[f.id + '|' + diaPresenca] || '';
+                          const cor = st === 'Presente' ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                            : st === 'Falta' ? 'bg-red-50 text-red-800 border-red-200'
+                            : st === 'Atestado' ? 'bg-blue-50 text-blue-800 border-blue-200'
+                            : 'bg-slate-50 text-slate-500 border-slate-200';
+                          return (
+                            <tr key={f.id}>
+                              <td className="px-6 py-3 font-bold text-slate-800">{f.nome}</td>
+                              <td className="px-6 py-3 text-slate-600">{f.funcao}</td>
+                              <td className="px-6 py-3 font-medium">{getObraNome(f.obraId)}</td>
+                              <td className="px-6 py-3">
+                                <select disabled={!can('func.presenca') || enviando} value={st}
+                                  onChange={e => marcarPresenca(f, e.target.value, diaPresenca)}
+                                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border ${cor}`}>
+                                  <option value="">— Sem registro —</option>
+                                  <option value="Presente">Presente</option>
+                                  <option value="Falta">Falta</option>
+                                  <option value="Atestado">Atestado</option>
+                                </select>
                               </td>
-                            )}
-                          </tr>
-                        ))}
+                              {can('func.gerir') && (
+                                <td className="px-6 py-3 no-print whitespace-nowrap">
+                                  <BtnAcao onClick={() => abrirFuncionario(f)}>Editar</BtnAcao>
+                                  <BtnAcao perigo onClick={() => excluirFuncionario(f)}>Excluir</BtnAcao>
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                    <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h4 className="font-bold text-slate-800">Histórico do mês — {NOMES_MES[Number(mesPresenca.slice(5, 7)) - 1]} de {mesPresenca.slice(0, 4)}</h4>
+                        <p className="text-xs text-slate-400">P = Presente · F = Falta · A = Atestado · clique num dia para editá-lo acima</p>
+                      </div>
+                      <div className="no-print flex items-center gap-2">
+                        <button type="button" onClick={() => mudarMes(-1)} title="Mês anterior" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100"><Icon name="chevronLeft" className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => mudarMes(1)} disabled={mesPresenca >= hoje.slice(0, 7)} title="Próximo mês" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-30"><Icon name="chevronRight" className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir folha</button>
+                      </div>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="text-xs text-center border-collapse">
+                        <thead className="bg-slate-50 text-slate-500 font-bold">
+                          <tr>
+                            <th className="px-3 py-2 text-left sticky left-0 bg-slate-50 min-w-[160px]">Funcionário</th>
+                            {diasMes.map(d => {
+                              const dt = new Date(d + 'T12:00:00'); const fds = dt.getDay() === 0 || dt.getDay() === 6;
+                              return (
+                                <th key={d} className={`px-1 py-2 min-w-[26px] ${fds ? 'text-slate-300' : ''} ${d === diaPresenca ? 'bg-amber-100 text-amber-800' : ''}`}>
+                                  {d > hoje ? Number(d.slice(8)) : <button type="button" onClick={() => setDiaPresenca(d)} className="hover:underline">{Number(d.slice(8))}</button>}
+                                </th>
+                              );
+                            })}
+                            <th className="px-2 py-2 text-emerald-700">P</th>
+                            <th className="px-2 py-2 text-red-700">F</th>
+                            <th className="px-2 py-2 text-blue-700">A</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {funcsVisiveis.map(f => {
+                            const r = resumoPresenca(f.id);
+                            return (
+                              <tr key={f.id}>
+                                <td className="px-3 py-2 text-left font-bold text-slate-700 sticky left-0 bg-white whitespace-nowrap">{f.nome}</td>
+                                {diasMes.map(d => {
+                                  const st = presencaMap[f.id + '|' + d];
+                                  const letra = st === 'Presente' ? 'P' : st === 'Falta' ? 'F' : st === 'Atestado' ? 'A' : '';
+                                  const cor = st === 'Presente' ? 'text-emerald-700 bg-emerald-50' : st === 'Falta' ? 'text-red-700 bg-red-50' : st === 'Atestado' ? 'text-blue-700 bg-blue-50' : 'text-slate-300';
+                                  return <td key={d} className={`px-1 py-2 font-bold ${cor}`}>{letra || (d <= hoje ? '·' : '')}</td>;
+                                })}
+                                <td className="px-2 py-2 font-black text-emerald-700">{r.Presente}</td>
+                                <td className="px-2 py-2 font-black text-red-700">{r.Falta}</td>
+                                <td className="px-2 py-2 font-black text-blue-700">{r.Atestado}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1276,6 +1477,12 @@
                 <form onSubmit={salvarMaterial} className="space-y-3 text-sm">
                   <input type="text" placeholder="Código (ex: MAT-006)" value={novoMatForm.codigo} onChange={e => setNovoMatForm({ ...novoMatForm, codigo: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Nome do Material" value={novoMatForm.nome} onChange={e => setNovoMatForm({ ...novoMatForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                  <label className="block text-xs font-bold uppercase text-slate-500">Categoria
+                    <input type="text" list="lista-categorias" placeholder="Escolha ou digite uma nova" value={novoMatForm.categoria} onChange={e => setNovoMatForm({ ...novoMatForm, categoria: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" required />
+                  </label>
+                  <datalist id="lista-categorias">
+                    {categoriasMateriais.map(c => <option key={c} value={c} />)}
+                  </datalist>
                   <div className="grid grid-cols-2 gap-2">
                     <input type="text" placeholder="Unidade (sc, kg, un)" value={novoMatForm.unidade} onChange={e => setNovoMatForm({ ...novoMatForm, unidade: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                     <input type="number" min="0" step="any" placeholder="Estoque Mínimo" value={novoMatForm.min} onChange={e => setNovoMatForm({ ...novoMatForm, min: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
