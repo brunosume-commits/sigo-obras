@@ -42,7 +42,10 @@ Isso faz os links de confirmação e de troca de senha voltarem para o sistema.
    **Nunca** coloque aqui a chave `service_role`.
 
 ### 5. Primeiro acesso
-1. Abra o sistema e clique em **Criar conta**. **A primeira conta criada vira Engenheiro** (administrador).
+1. (Recomendado) No SQL Editor, cadastre o e-mail do administrador:
+   `insert into public.administradores (email) values ('seu@email.com');`
+   Sem isso, **a primeira conta criada vira Engenheiro** (administrador).
+   Abra o sistema e clique em **Criar conta**.
 2. Confirme pelo e-mail recebido e entre.
 3. Para cada pessoa da equipe: ela clica em **Criar conta**; você abre a aba **Usuários**,
    escolhe o perfil e clica em **Liberar**. Contas novas não acessam nada até serem liberadas.
