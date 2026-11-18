@@ -116,6 +116,10 @@
     };
 
     const CLIMAS = ['Bom', 'Nublado', 'Chuva', 'Impraticável'];
+    const TIPOS_DOC = ['ASO (exame ocupacional)', 'NR-35 Trabalho em altura', 'NR-10 Eletricidade', 'NR-18 Construção civil', 'NR-12 Máquinas', 'NR-06 EPI', 'NR-33 Espaço confinado', 'Contrato', 'Seguro de vida', 'Alvará / licença', 'Outro'];
+    const AVISO_DIAS = 30;
+    const diasAte = (iso) => { if (!iso) return null; const [a, m, d] = iso.split('-').map(Number); const h = new Date(); return Math.round((new Date(a, m - 1, d) - new Date(h.getFullYear(), h.getMonth(), h.getDate())) / 86400000); };
+    const situacaoDoc = (doc) => { const n = diasAte(doc.validade); if (n === null) return 'Sem validade'; if (n < 0) return 'Vencido'; if (n <= AVISO_DIAS) return 'Vence em breve'; return 'Em dia'; };
     // Reduz a foto (máx. 1600 px, JPEG 80%) antes de enviar: economiza dados do celular e espaço no Supabase
     const comprimirImagem = (file) => new Promise((resolve, reject) => {
       const url = URL.createObjectURL(file);
@@ -144,7 +148,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'diario', 'compras', 'financeiro', 'funcionarios', 'folha', 'relatorios', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'diario', 'compras', 'financeiro', 'funcionarios', 'documentos', 'folha', 'relatorios', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -154,7 +158,7 @@
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
-        abas: ['materiais', 'obras', 'diario', 'compras', 'funcionarios'],
+        abas: ['materiais', 'obras', 'diario', 'compras', 'funcionarios', 'documentos'],
         acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir'],
       },
     };
@@ -163,7 +167,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -203,8 +207,9 @@
         eng ? sb.from('folha_itens').select('*').eq('mes', mesFolha) : Promise.resolve({ data: [] }),
         sb.from('diarios').select('*').order('dia', { ascending: false }).limit(400),
         sb.from('presencas').select('funcionario_id, dia, status').eq('dia', diaDiario),
+        (eng || perfil === 'Mestre de Obras') ? sb.from('documentos').select('*').order('validade', { ascending: true }) : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos] = (await Promise.all(consultas)).map(ok);
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
@@ -233,6 +238,7 @@
         folhaItens: itensF.map(i => ({ ...i, valor_base: num(i.valor_base), valor_calculado: num(i.valor_calculado), ajuste: num(i.ajuste), total: num(i.total) })),
         diarios: diarios.map(d => ({ ...d, fotos: fotos.filter(f => f.diario_id === d.id) })),
         presencasDiario: presDiario.map(p => ({ funcionarioId: p.funcionario_id, status: p.status })),
+        documentos,
       };
     }
 
@@ -282,6 +288,11 @@
       const [diarioForm, setDiarioForm] = useState(null);     // rascunho em edição
       const [fotoUrls, setFotoUrls] = useState({});           // caminho -> URL assinada
       const [enviandoFotos, setEnviandoFotos] = useState(0);
+      const [docModal, setDocModal] = useState(false);
+      const [docForm, setDocForm] = useState({});
+      const [docArquivo, setDocArquivo] = useState(null);
+      const [filtroDoc, setFiltroDoc] = useState('');
+      const [buscaDoc, setBuscaDoc] = useState('');
       useEffect(() => { setAjustesFolha({}); }, [mesFolha]);
       const [selectedObra, setSelectedObra] = useState('ALL');
 
@@ -578,6 +589,51 @@
         });
       };
 
+      // ---------- Documentos ----------
+      const docsAlerta = data.documentos.filter(d => ['Vencido', 'Vence em breve'].includes(situacaoDoc(d)));
+      const abrirDocumento = (doc) => {
+        setDocArquivo(null);
+        setDocForm(doc ? { ...doc, vinculo: doc.funcionario_id ? 'func' : 'empresa' }
+                       : { vinculo: 'func', funcionario_id: data.funcionarios[0]?.id || '', empresa: '', tipo: TIPOS_DOC[0], descricao: '', emissao: hojeISO(), validade: '' });
+        setDocModal(true);
+      };
+      const salvarDocumento = async (e) => {
+        e.preventDefault();
+        const f = docForm;
+        if (f.vinculo === 'func' && !f.funcionario_id) return alert('Escolha o funcionário.');
+        if (f.vinculo === 'empresa' && !f.empresa.trim()) return alert('Informe a empresa.');
+        if (f.emissao && f.validade && f.validade < f.emissao) return alert('A validade não pode ser anterior à emissão.');
+        if (docArquivo && docArquivo.size > 10 * 1024 * 1024) return alert('O arquivo passa de 10 MB.');
+        if (await executar(async () => {
+          let arquivo = f.arquivo || null;
+          if (docArquivo) {
+            const ext = (docArquivo.name.split('.').pop() || 'pdf').toLowerCase();
+            const caminho = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+            const corpo = docArquivo.type.startsWith('image/') ? await comprimirImagem(docArquivo) : docArquivo;
+            const up = await sb.storage.from('documentos').upload(caminho, corpo, { contentType: docArquivo.type.startsWith('image/') ? 'image/jpeg' : docArquivo.type });
+            if (up.error) throw new Error('Falha ao enviar o arquivo: ' + up.error.message);
+            if (f.arquivo) await sb.storage.from('documentos').remove([f.arquivo]);
+            arquivo = caminho;
+          }
+          const reg = { funcionario_id: f.vinculo === 'func' ? f.funcionario_id : null, empresa: f.vinculo === 'empresa' ? f.empresa.trim() : '',
+                        tipo: f.tipo, descricao: (f.descricao || '').trim(), emissao: f.emissao || null, validade: f.validade || null, arquivo };
+          ok(f.id ? await sb.from('documentos').update(reg).eq('id', f.id) : await sb.from('documentos').insert(reg));
+        })) setDocModal(false);
+      };
+      const excluirDocumento = (doc) => {
+        if (!confirm(`Excluir o documento "${doc.tipo}"${doc.arquivo ? ' e o arquivo anexado' : ''}?`)) return;
+        executar(async () => {
+          if (doc.arquivo) await sb.storage.from('documentos').remove([doc.arquivo]);
+          ok(await sb.from('documentos').delete().eq('id', doc.id));
+        });
+      };
+      const abrirArquivoDoc = async (doc) => {
+        const janela = window.open('', '_blank');
+        const { data: u, error } = await sb.storage.from('documentos').createSignedUrl(doc.arquivo, 600);
+        if (error || !u?.signedUrl) { janela && janela.close(); return alert('Não foi possível abrir o arquivo.'); }
+        if (janela) janela.location.href = u.signedUrl; else window.location.href = u.signedUrl;
+      };
+
       // ---------- Folha de pagamento ----------
       const fecharFolha = (itens) => {
         const total = itens.reduce((s, i) => s + i.total, 0);
@@ -748,6 +804,7 @@
         { id: 'compras', label: 'Compras & Fornecedores', icon: 'cart' },
         { id: 'financeiro', label: 'Controle Financeiro', icon: 'dollar' },
         { id: 'funcionarios', label: 'Funcionários', icon: 'users' },
+        { id: 'documentos', label: 'Documentos', icon: 'file', badge: docsAlerta.length || null },
         { id: 'folha', label: 'Folha de Pagamento', icon: 'wallet' },
         { id: 'relatorios', label: 'Relatórios', icon: 'file' },
         { id: 'usuarios', label: 'Usuários', icon: 'users', badge: data.perfis.filter(p => !p.ativo).length || null },
@@ -874,6 +931,15 @@
                 <div className="no-print bg-red-50 border border-red-200 text-red-800 rounded-xl p-4 text-sm flex justify-between items-center gap-3">
                   <span>{erroConexao}</span>
                   <button onClick={recarregar} className="bg-red-600 text-white text-xs font-bold px-3 py-2 rounded-lg">Tentar de novo</button>
+                </div>
+              )}
+              {docsAlerta.length > 0 && aba !== 'documentos' && (
+                <div className="no-print bg-amber-50 border border-amber-200 rounded-xl p-4 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 text-amber-900 text-sm">
+                    <Icon name="alert" className="w-5 h-5 text-amber-600 shrink-0" />
+                    <span><strong>Documentos:</strong> {docsAlerta.filter(d => situacaoDoc(d) === 'Vencido').length} vencido(s) e {docsAlerta.filter(d => situacaoDoc(d) === 'Vence em breve').length} vencendo em até {AVISO_DIAS} dias.</span>
+                  </div>
+                  <button onClick={() => setActiveTab('documentos')} className="bg-amber-500 hover:bg-amber-600 text-slate-950 text-xs font-bold px-3 py-2 rounded-lg">Ver documentos</button>
                 </div>
               )}
               {alertasEstoque.length > 0 && (
@@ -1610,6 +1676,81 @@
                 );
               })()}
 
+              {aba === 'documentos' && (() => {
+                const nomeFunc = (id) => data.funcionarios.find(f => f.id === id)?.nome || '—';
+                const obraFunc = (id) => data.funcionarios.find(f => f.id === id)?.obraId;
+                const cores = { 'Vencido': 'bg-red-100 text-red-800', 'Vence em breve': 'bg-amber-100 text-amber-800', 'Em dia': 'bg-emerald-100 text-emerald-800', 'Sem validade': 'bg-slate-100 text-slate-600' };
+                const termo = semAcento(buscaDoc.trim());
+                const lista = data.documentos
+                  .filter(d => selectedObra === 'ALL' || !d.funcionario_id || obraFunc(d.funcionario_id) === selectedObra)
+                  .filter(d => !filtroDoc || situacaoDoc(d) === filtroDoc)
+                  .filter(d => !termo || semAcento(`${d.tipo} ${d.descricao} ${d.empresa} ${d.funcionario_id ? nomeFunc(d.funcionario_id) : ''}`).includes(termo));
+                const contagem = s => data.documentos.filter(d => situacaoDoc(d) === s).length;
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Documentos com vencimento</h3>
+                        <p className="text-xs text-slate-500">ASO, treinamentos de NR, contratos e seguros de funcionários e terceirizados. Aviso a partir de {AVISO_DIAS} dias antes de vencer.</p>
+                      </div>
+                      {can('doc.gerir') && (
+                        <button onClick={() => abrirDocumento(null)} className="no-print bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                          <Icon name="plus" className="w-4 h-4" /> Cadastrar documento
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 no-print">
+                      {['Vencido', 'Vence em breve', 'Em dia', 'Sem validade'].map(st => (
+                        <button key={st} type="button" onClick={() => setFiltroDoc(filtroDoc === st ? '' : st)}
+                          className={`text-left p-4 rounded-2xl border shadow-sm ${filtroDoc === st ? 'border-slate-900 ring-2 ring-slate-900' : 'border-slate-200'} bg-white`}>
+                          <p className="text-xs font-bold uppercase text-slate-400">{st}</p>
+                          <p className={`text-3xl font-black mt-1 ${st === 'Vencido' ? 'text-red-600' : st === 'Vence em breve' ? 'text-amber-600' : st === 'Em dia' ? 'text-emerald-600' : 'text-slate-500'}`}>{contagem(st)}</p>
+                        </button>
+                      ))}
+                    </div>
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                      <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap gap-3 items-center justify-between no-print">
+                        <div className="relative w-full sm:w-72">
+                          <Icon name="search" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                          <input type="search" value={buscaDoc} onChange={e => setBuscaDoc(e.target.value)} placeholder="Buscar por nome, empresa ou tipo"
+                            className="w-full border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
+                        </div>
+                        {filtroDoc && <button type="button" onClick={() => setFiltroDoc('')} className="text-xs font-bold text-amber-700 hover:underline">Mostrar todos</button>}
+                      </div>
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                          <tr>
+                            <th className="px-6 py-3">Situação</th><th className="px-6 py-3">Documento</th><th className="px-6 py-3">De quem</th>
+                            <th className="px-6 py-3">Emissão</th><th className="px-6 py-3">Validade</th><th className="px-6 py-3 no-print">Arquivo</th>
+                            {can('doc.gerir') && <th className="px-6 py-3 no-print">Ações</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {lista.length === 0 && <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-400">{data.documentos.length ? 'Nenhum documento com esses filtros.' : 'Nenhum documento cadastrado ainda.'}</td></tr>}
+                          {lista.map(d => {
+                            const st = situacaoDoc(d); const n = diasAte(d.validade);
+                            return (
+                              <tr key={d.id} className={st === 'Vencido' ? 'bg-red-50/40' : ''}>
+                                <td className="px-6 py-3"><span className={`px-2 py-0.5 rounded text-xs font-bold whitespace-nowrap ${cores[st]}`}>{st}</span></td>
+                                <td className="px-6 py-3"><p className="font-bold text-slate-800">{d.tipo}</p>{d.descricao && <p className="text-xs text-slate-500">{d.descricao}</p>}</td>
+                                <td className="px-6 py-3">{d.funcionario_id ? <><p className="font-semibold">{nomeFunc(d.funcionario_id)}</p><p className="text-xs text-slate-500">{getObraNome(obraFunc(d.funcionario_id))}</p></> : <><p className="font-semibold">{d.empresa}</p><p className="text-xs text-slate-500">Empresa terceirizada</p></>}</td>
+                                <td className="px-6 py-3 text-xs whitespace-nowrap">{fmtData(d.emissao)}</td>
+                                <td className="px-6 py-3 text-xs whitespace-nowrap"><strong>{fmtData(d.validade)}</strong>
+                                  {n !== null && <p className={n < 0 ? 'text-red-700 font-bold' : n <= AVISO_DIAS ? 'text-amber-700 font-bold' : 'text-slate-400'}>{n < 0 ? `venceu há ${-n} dia(s)` : n === 0 ? 'vence hoje' : `faltam ${n} dia(s)`}</p>}
+                                </td>
+                                <td className="px-6 py-3 no-print">{d.arquivo ? <BtnAcao onClick={() => abrirArquivoDoc(d)}>Abrir</BtnAcao> : <span className="text-xs text-slate-400">—</span>}</td>
+                                {can('doc.gerir') && <td className="px-6 py-3 no-print whitespace-nowrap"><BtnAcao onClick={() => abrirDocumento(d)}>Editar</BtnAcao><BtnAcao perigo onClick={() => excluirDocumento(d)}>Excluir</BtnAcao></td>}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-slate-400">Para renovar, edite o documento com a nova data e o novo arquivo.</p>
+                  </div>
+                );
+              })()}
+
               {aba === 'folha' && (() => {
                 const fechada = data.folha;
                 const contF = {};
@@ -1985,6 +2126,47 @@
                   <input type="text" placeholder="Categoria (ex: Ferragens e Aço)" value={fornForm.categoria} onChange={e => setFornForm({ ...fornForm, categoria: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setFornModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {docModal && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                <h3 className="text-lg font-extrabold">{docForm.id ? 'Editar documento' : 'Cadastrar documento'}</h3>
+                <form onSubmit={salvarDocumento} className="space-y-3 text-sm">
+                  <div className="flex gap-2">
+                    {[['func', 'Funcionário'], ['empresa', 'Empresa terceirizada']].map(([v, r]) => (
+                      <button key={v} type="button" onClick={() => setDocForm({ ...docForm, vinculo: v })}
+                        className={`flex-1 px-3 py-2 rounded-lg border font-bold text-xs ${docForm.vinculo === v ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-300 text-slate-700'}`}>{r}</button>
+                    ))}
+                  </div>
+                  {docForm.vinculo === 'func'
+                    ? <select value={docForm.funcionario_id || ''} onChange={e => setDocForm({ ...docForm, funcionario_id: e.target.value })} className="w-full border rounded-lg px-3 py-2" required>
+                        {data.funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome} — {f.funcao}</option>)}
+                      </select>
+                    : <input type="text" placeholder="Nome da empresa" value={docForm.empresa || ''} onChange={e => setDocForm({ ...docForm, empresa: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />}
+                  <select value={docForm.tipo} onChange={e => setDocForm({ ...docForm, tipo: e.target.value })} className="w-full border rounded-lg px-3 py-2">
+                    {[...new Set([...TIPOS_DOC, docForm.tipo])].map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <input type="text" placeholder="Descrição (opcional, ex.: nº do certificado)" value={docForm.descricao || ''} onChange={e => setDocForm({ ...docForm, descricao: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs font-bold uppercase text-slate-500">Emissão
+                      <input type="date" value={docForm.emissao || ''} onChange={e => setDocForm({ ...docForm, emissao: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
+                    </label>
+                    <label className="text-xs font-bold uppercase text-slate-500">Validade
+                      <input type="date" value={docForm.validade || ''} onChange={e => setDocForm({ ...docForm, validade: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
+                    </label>
+                  </div>
+                  <label className="block text-xs font-bold uppercase text-slate-500">Arquivo (PDF ou foto, até 10 MB)
+                    <input type="file" accept="application/pdf,image/*" onChange={e => setDocArquivo(e.target.files[0] || null)} className="w-full mt-1 text-sm font-normal normal-case text-slate-700" />
+                    {docForm.arquivo && !docArquivo && <span className="block mt-1 text-xs font-normal normal-case text-emerald-700">Já tem arquivo anexado. Escolha outro só para substituir.</span>}
+                  </label>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setDocModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
                     <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
                   </div>
                 </form>
