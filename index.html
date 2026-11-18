@@ -18,6 +18,9 @@
   </script>
   <style>
     @media print {
+      body.imprimindo-ficha #root > div > *:not(.ficha-epi) { display: none !important; }
+      body.imprimindo-ficha .ficha-epi { position: static !important; background: white !important; padding: 0 !important; }
+      body.imprimindo-ficha .ficha-epi > div { box-shadow: none !important; max-height: none !important; overflow: visible !important; }
       .no-print { display: none !important; }
       body { background: white !important; }
     }
@@ -47,6 +50,7 @@
         wallet: <><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>,
         book: <><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8"/><path d="M8 11h6"/></>,
         camera: <><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>,
+        shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></>,
         search: <><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></>,
         chevronLeft: <><polyline points="15 18 9 12 15 6"/></>,
         chevronRight: <><polyline points="9 18 15 12 9 6"/></>,
@@ -148,18 +152,18 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'diario', 'compras', 'financeiro', 'funcionarios', 'documentos', 'folha', 'relatorios', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'diario', 'compras', 'financeiro', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
         abaInicial: 'materiais',
-        abas: ['materiais', 'obras', 'diario', 'compras', 'relatorios'],
-        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'fornecedor.gerir', 'compra.criar', 'compra.editar', 'compra.receber'],
+        abas: ['materiais', 'obras', 'diario', 'compras', 'epi', 'relatorios'],
+        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'fornecedor.gerir', 'compra.criar', 'compra.editar', 'compra.receber', 'epi.entregar', 'epi.cancelar'],
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
-        abas: ['materiais', 'obras', 'diario', 'compras', 'funcionarios', 'documentos'],
-        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir'],
+        abas: ['materiais', 'obras', 'diario', 'compras', 'funcionarios', 'epi', 'documentos'],
+        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar'],
       },
     };
 
@@ -167,7 +171,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -208,8 +212,9 @@
         sb.from('diarios').select('*').order('dia', { ascending: false }).limit(400),
         sb.from('presencas').select('funcionario_id, dia, status').eq('dia', diaDiario),
         (eng || perfil === 'Mestre de Obras') ? sb.from('documentos').select('*').order('validade', { ascending: true }) : Promise.resolve({ data: [] }),
+        sb.from('epi_entregas').select('*').order('dia', { ascending: false }).order('criado_em', { ascending: false }).limit(2000),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis] = (await Promise.all(consultas)).map(ok);
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
@@ -239,6 +244,7 @@
         diarios: diarios.map(d => ({ ...d, fotos: fotos.filter(f => f.diario_id === d.id) })),
         presencasDiario: presDiario.map(p => ({ funcionarioId: p.funcionario_id, status: p.status })),
         documentos,
+        epis: epis.map(e => ({ ...e, qtd: num(e.qtd) })),
       };
     }
 
@@ -293,6 +299,10 @@
       const [docArquivo, setDocArquivo] = useState(null);
       const [filtroDoc, setFiltroDoc] = useState('');
       const [buscaDoc, setBuscaDoc] = useState('');
+      const [epiModal, setEpiModal] = useState(false);
+      const [epiForm, setEpiForm] = useState({});
+      const [epiFiltroFunc, setEpiFiltroFunc] = useState('');
+      const [fichaEpi, setFichaEpi] = useState(null);   // id do funcionário com a ficha aberta
       useEffect(() => { setAjustesFolha({}); }, [mesFolha]);
       const [selectedObra, setSelectedObra] = useState('ALL');
 
@@ -634,6 +644,33 @@
         if (janela) janela.location.href = u.signedUrl; else window.location.href = u.signedUrl;
       };
 
+      // ---------- EPI ----------
+      const TROCA_AVISO = 15;
+      const episTroca = data.epis.filter(e => e.troca_prevista && diasAte(e.troca_prevista) <= TROCA_AVISO &&
+        !data.epis.some(o => o.funcionario_id === e.funcionario_id && o.material_id === e.material_id && (o.dia > e.dia || (o.dia === e.dia && o.criado_em > e.criado_em))));
+      const ehEpi = (m) => /epi|segurança|seguranca/i.test(m.categoria) || /capacete|luva|bota|óculos|oculos|protetor|cinto|máscara|mascara|colete|botina|abafador|respirador/i.test(m.nome);
+      const abrirEntregaEpi = (funcId, materialId) => {
+        if (!data.funcionarios.length) return alert('Cadastre os funcionários antes.');
+        const f = data.funcionarios.find(x => x.id === funcId) || data.funcionarios[0];
+        const mats = [...data.materiais].sort((a, b) => ehEpi(b) - ehEpi(a));
+        setEpiForm({ funcionarioId: f.id, obraId: f.obraId || primeiraObra(), materialId: materialId || mats[0]?.id || '', qtd: 1, ca: '', troca: somaDias(90) });
+        setEpiModal(true);
+      };
+      const salvarEntregaEpi = async (e) => {
+        e.preventDefault();
+        const qtd = Number(epiForm.qtd);
+        if (!(qtd > 0)) return alert('Informe a quantidade.');
+        const saldo = getMat(epiForm.materialId)?.estoques[epiForm.obraId] || 0;
+        if (qtd > saldo) return alert(`Saldo insuficiente na obra (disponível: ${saldo}).`);
+        if (await executar(async () => ok(await sb.rpc('entregar_epi', {
+          p_funcionario: epiForm.funcionarioId, p_material: epiForm.materialId, p_obra: epiForm.obraId,
+          p_qtd: qtd, p_ca: (epiForm.ca || '').trim(), p_troca: epiForm.troca || null })))) setEpiModal(false);
+      };
+      const cancelarEntregaEpi = (ent) => {
+        if (!confirm('Cancelar esta entrega de EPI? O material volta para o estoque da obra.')) return;
+        executar(async () => ok(await sb.rpc('cancelar_entrega_epi', { p_id: ent.id })));
+      };
+
       // ---------- Folha de pagamento ----------
       const fecharFolha = (itens) => {
         const total = itens.reduce((s, i) => s + i.total, 0);
@@ -804,6 +841,7 @@
         { id: 'compras', label: 'Compras & Fornecedores', icon: 'cart' },
         { id: 'financeiro', label: 'Controle Financeiro', icon: 'dollar' },
         { id: 'funcionarios', label: 'Funcionários', icon: 'users' },
+        { id: 'epi', label: 'Controle de EPI', icon: 'shield', badge: episTroca.length || null },
         { id: 'documentos', label: 'Documentos', icon: 'file', badge: docsAlerta.length || null },
         { id: 'folha', label: 'Folha de Pagamento', icon: 'wallet' },
         { id: 'relatorios', label: 'Relatórios', icon: 'file' },
@@ -1676,6 +1714,90 @@
                 );
               })()}
 
+              {aba === 'epi' && (() => {
+                const nomeFunc = (id) => data.funcionarios.find(f => f.id === id)?.nome || '—';
+                const funcsLista = funcsVisiveis;
+                const lista = data.epis.filter(e => (selectedObra === 'ALL' || e.obra_id === selectedObra) && (!epiFiltroFunc || e.funcionario_id === epiFiltroFunc));
+                const trocaSt = (e) => { const n = diasAte(e.troca_prevista); if (n === null) return null; return n < 0 ? 'vencida' : n <= TROCA_AVISO ? 'breve' : 'ok'; };
+                const ultimaDoPar = (e) => !data.epis.some(o => o.funcionario_id === e.funcionario_id && o.material_id === e.material_id && (o.dia > e.dia || (o.dia === e.dia && o.criado_em > e.criado_em)));
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Controle de EPI</h3>
+                        <p className="text-xs text-slate-500">A entrega dá baixa no estoque da obra. Aviso de troca a partir de {TROCA_AVISO} dias antes da data prevista.</p>
+                      </div>
+                      {can('epi.entregar') && (
+                        <button onClick={() => abrirEntregaEpi(epiFiltroFunc)} className="no-print bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                          <Icon name="plus" className="w-4 h-4" /> Registrar entrega
+                        </button>
+                      )}
+                    </div>
+
+                    {episTroca.length > 0 && (
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 space-y-2 no-print">
+                        <p className="text-sm font-bold text-amber-900">Trocas de EPI vencidas ou próximas ({episTroca.length})</p>
+                        <div className="flex flex-wrap gap-2">
+                          {episTroca.map(e => (
+                            <span key={e.id} className={`text-xs px-2.5 py-1 rounded-lg font-semibold ${diasAte(e.troca_prevista) < 0 ? 'bg-red-100 text-red-800' : 'bg-amber-100 text-amber-900'}`}>
+                              {nomeFunc(e.funcionario_id)} · {getMat(e.material_id)?.nome} · {fmtData(e.troca_prevista)}
+                              {can('epi.entregar') && <button type="button" onClick={() => abrirEntregaEpi(e.funcionario_id, e.material_id)} className="ml-2 underline">trocar</button>}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                      <h4 className="font-bold text-slate-800">Ficha de EPI por funcionário</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {funcsLista.length === 0 && <p className="text-sm text-slate-400">Nenhum funcionário cadastrado.</p>}
+                        {funcsLista.map(f => {
+                          const n = data.epis.filter(e => e.funcionario_id === f.id).length;
+                          return (
+                            <div key={f.id} className={`flex items-center gap-1 border rounded-lg pl-3 pr-1 py-1 ${epiFiltroFunc === f.id ? 'border-slate-900 bg-slate-50' : 'border-slate-200'}`}>
+                              <button type="button" onClick={() => setEpiFiltroFunc(epiFiltroFunc === f.id ? '' : f.id)} className="text-sm font-semibold text-slate-800">{f.nome} <span className="text-xs text-slate-400">({n})</span></button>
+                              <BtnAcao onClick={() => setFichaEpi(f.id)}>Ficha</BtnAcao>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                      <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                        <h4 className="font-bold text-slate-800">Entregas {epiFiltroFunc ? `— ${nomeFunc(epiFiltroFunc)}` : ''}</h4>
+                        {epiFiltroFunc && <button type="button" onClick={() => setEpiFiltroFunc('')} className="text-xs font-bold text-amber-700 hover:underline">Mostrar todos</button>}
+                      </div>
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                          <tr><th className="px-6 py-3">Data</th><th className="px-6 py-3">Funcionário</th><th className="px-6 py-3">EPI</th><th className="px-6 py-3">Qtd</th><th className="px-6 py-3">CA</th><th className="px-6 py-3">Troca prevista</th><th className="px-6 py-3">Entregue por</th>{can('epi.cancelar') && <th className="px-6 py-3 no-print">Ação</th>}</tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {lista.length === 0 && <tr><td colSpan={8} className="px-6 py-8 text-center text-slate-400">Nenhuma entrega registrada.</td></tr>}
+                          {lista.map(e => {
+                            const mat = getMat(e.material_id); const t = trocaSt(e); const atual = ultimaDoPar(e);
+                            return (
+                              <tr key={e.id}>
+                                <td className="px-6 py-3 whitespace-nowrap">{fmtData(e.dia)}</td>
+                                <td className="px-6 py-3 font-semibold">{nomeFunc(e.funcionario_id)}</td>
+                                <td className="px-6 py-3">{mat?.nome}</td>
+                                <td className="px-6 py-3">{e.qtd} {mat?.unidade}</td>
+                                <td className="px-6 py-3 text-xs">{e.ca || '—'}</td>
+                                <td className="px-6 py-3 text-xs whitespace-nowrap">{e.troca_prevista ? <span className={atual && t === 'vencida' ? 'text-red-700 font-bold' : atual && t === 'breve' ? 'text-amber-700 font-bold' : ''}>{fmtData(e.troca_prevista)}{!atual ? ' (já trocado)' : ''}</span> : '—'}</td>
+                                <td className="px-6 py-3 text-xs">{e.entregue_por}</td>
+                                {can('epi.cancelar') && <td className="px-6 py-3 no-print"><BtnAcao perigo onClick={() => cancelarEntregaEpi(e)}>Cancelar</BtnAcao></td>}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                    <p className="text-xs text-slate-400">Dica: cadastre os EPIs como materiais (categoria "Ferramentas e EPI") e dê entrada no estoque normalmente.</p>
+                  </div>
+                );
+              })()}
+
               {aba === 'documentos' && (() => {
                 const nomeFunc = (id) => data.funcionarios.find(f => f.id === id)?.nome || '—';
                 const obraFunc = (id) => data.funcionarios.find(f => f.id === id)?.obraId;
@@ -2132,6 +2254,87 @@
               </div>
             </div>
           )}
+
+          {epiModal && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                <h3 className="text-lg font-extrabold">Registrar entrega de EPI</h3>
+                <form onSubmit={salvarEntregaEpi} className="space-y-3 text-sm">
+                  <label className="block text-xs font-bold uppercase text-slate-500">Funcionário
+                    <select value={epiForm.funcionarioId} onChange={e => { const f = data.funcionarios.find(x => x.id === e.target.value); setEpiForm({ ...epiForm, funcionarioId: e.target.value, obraId: f?.obraId || epiForm.obraId }); }} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900">
+                      {data.funcionarios.map(f => <option key={f.id} value={f.id}>{f.nome} — {f.funcao}</option>)}
+                    </select>
+                  </label>
+                  <label className="block text-xs font-bold uppercase text-slate-500">Sai do estoque da obra
+                    <select value={epiForm.obraId} onChange={e => setEpiForm({ ...epiForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900">
+                      {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+                    </select>
+                  </label>
+                  <label className="block text-xs font-bold uppercase text-slate-500">EPI
+                    <select value={epiForm.materialId} onChange={e => setEpiForm({ ...epiForm, materialId: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900">
+                      {[...data.materiais].sort((a, b) => ehEpi(b) - ehEpi(a)).map(m => <option key={m.id} value={m.id}>{m.nome} (saldo: {m.estoques[epiForm.obraId] || 0} {m.unidade})</option>)}
+                    </select>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs font-bold uppercase text-slate-500">Quantidade
+                      <input type="number" min="0.01" step="any" value={epiForm.qtd} onChange={e => setEpiForm({ ...epiForm, qtd: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" required />
+                    </label>
+                    <label className="text-xs font-bold uppercase text-slate-500">Nº do CA
+                      <input type="text" value={epiForm.ca} placeholder="Certificado de Aprovação" onChange={e => setEpiForm({ ...epiForm, ca: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
+                    </label>
+                  </div>
+                  <label className="block text-xs font-bold uppercase text-slate-500">Troca prevista
+                    <input type="date" value={epiForm.troca || ''} onChange={e => setEpiForm({ ...epiForm, troca: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
+                    <span className="flex gap-2 mt-1 normal-case font-normal">
+                      {[[30, '30 dias'], [90, '3 meses'], [180, '6 meses'], [365, '1 ano']].map(([d, r]) => <button key={d} type="button" onClick={() => setEpiForm({ ...epiForm, troca: somaDias(d) })} className="text-xs text-amber-700 hover:underline">{r}</button>)}
+                      <button type="button" onClick={() => setEpiForm({ ...epiForm, troca: '' })} className="text-xs text-slate-500 hover:underline">sem data</button>
+                    </span>
+                  </label>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setEpiModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Registrar entrega</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {fichaEpi && (() => {
+            const f = data.funcionarios.find(x => x.id === fichaEpi);
+            const ents = data.epis.filter(e => e.funcionario_id === fichaEpi).slice().reverse();
+            const imprimir = () => { document.body.classList.add('imprimindo-ficha'); window.print(); document.body.classList.remove('imprimindo-ficha'); };
+            return (
+              <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-2xl max-w-3xl w-full p-8 space-y-5 max-h-[95vh] overflow-y-auto text-sm">
+                  <div className="flex justify-between items-start gap-4">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Ficha de controle de entrega de EPI (NR-6)</p>
+                      <h3 className="text-xl font-extrabold text-slate-900 mt-1">{f?.nome}</h3>
+                      <p className="text-slate-600">{f?.funcao} · {getObraNome(f?.obraId)}</p>
+                    </div>
+                    <div className="no-print flex gap-2">
+                      <button type="button" onClick={imprimir} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
+                      <button type="button" onClick={() => setFichaEpi(null)} className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold">Fechar</button>
+                    </div>
+                  </div>
+                  <table className="w-full text-left border border-slate-300">
+                    <thead className="bg-slate-100 text-xs uppercase font-bold"><tr><th className="p-2 border border-slate-300">Data</th><th className="p-2 border border-slate-300">EPI</th><th className="p-2 border border-slate-300">Qtd</th><th className="p-2 border border-slate-300">CA</th><th className="p-2 border border-slate-300">Troca prevista</th><th className="p-2 border border-slate-300 w-44">Assinatura</th></tr></thead>
+                    <tbody>
+                      {ents.length === 0 && <tr><td colSpan={6} className="p-4 text-center text-slate-400">Nenhuma entrega registrada.</td></tr>}
+                      {ents.map(e => { const m = getMat(e.material_id); return (
+                        <tr key={e.id}><td className="p-2 border border-slate-300 whitespace-nowrap">{fmtData(e.dia)}</td><td className="p-2 border border-slate-300">{m?.nome}</td><td className="p-2 border border-slate-300">{e.qtd} {m?.unidade}</td><td className="p-2 border border-slate-300">{e.ca || '—'}</td><td className="p-2 border border-slate-300">{fmtData(e.troca_prevista)}</td><td className="p-2 border border-slate-300"></td></tr>
+                      ); })}
+                    </tbody>
+                  </table>
+                  <p className="text-xs text-slate-600 leading-relaxed">Declaro ter recebido os Equipamentos de Proteção Individual acima, em perfeito estado, e ter sido orientado(a) sobre o uso correto, a guarda e a conservação, comprometendo-me a usá-los apenas para a finalidade a que se destinam e a comunicar qualquer alteração que os torne impróprios para uso, conforme a NR-6.</p>
+                  <div className="grid grid-cols-2 gap-10 pt-10 text-xs text-center text-slate-600">
+                    <div className="border-t border-slate-400 pt-1">{f?.nome}</div>
+                    <div className="border-t border-slate-400 pt-1">Responsável pela entrega</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {docModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
