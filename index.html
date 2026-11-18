@@ -94,7 +94,7 @@
                   <div className="flex-1 bg-slate-100 h-3 rounded-full overflow-hidden">
                     <div className={`h-full rounded-full ${sr.cor}`} style={{ width: `${Math.max(0, (Number(sr.valor) || 0) / max * 100)}%` }}></div>
                   </div>
-                  {i.series && <span className="text-[11px] text-slate-600 w-32 text-right whitespace-nowrap">{sr.nome}: <strong>{formato(sr.valor)}</strong></span>}
+                  {i.series && <span className="text-[11px] text-slate-600 w-40 shrink-0 text-right whitespace-nowrap">{sr.nome}: <strong>{formato(sr.valor)}</strong></span>}
                 </div>
               ))}
             </div>
@@ -806,14 +806,14 @@
                         <span className="text-xs text-slate-400">Itens em vermelho atingiram o estoque mínimo</span>
                       </div>
                       <div className="no-print flex flex-wrap gap-2 w-full sm:w-auto">
-                        <div className="relative flex-1 sm:w-64">
+                        <div className="relative w-full sm:w-64">
                           <Icon name="search" className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                           <input type="search" value={buscaEstoque} onChange={e => setBuscaEstoque(e.target.value)}
                             placeholder="Buscar por nome, código ou categoria"
                             className="w-full border border-slate-300 rounded-lg pl-9 pr-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
                         </div>
                         <select value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)}
-                          className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:border-amber-500">
+                          className="w-full sm:w-auto border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold text-slate-700 focus:outline-none focus:border-amber-500">
                           <option value="">Todas as categorias</option>
                           {categoriasEmUso.map(c => <option key={c} value={c}>{c}</option>)}
                         </select>
@@ -945,7 +945,7 @@
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold uppercase text-slate-400">Despesas Lançadas</p>
                       <p className="text-2xl font-black text-amber-600 mt-1">{formatBRL(totalGasto)}</p>
-                      <p className="text-xs text-slate-500 mt-2">{totalOrcado ? ((totalGasto / totalOrcado) * 100).toFixed(1) : 0}% do orçamento</p>
+                      <p className="text-xs text-slate-500 mt-2">{totalOrcado ? ((totalGasto / totalOrcado) * 100).toFixed(1).replace('.', ',') : 0}% do orçamento</p>
                     </div>
                     <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                       <p className="text-xs font-bold uppercase text-slate-400">Alertas de Material</p>
@@ -962,7 +962,7 @@
                           const gasto = data.despesas.filter(d => d.obraId === obra.id).reduce((s, d) => s + Number(d.valor), 0);
                           const pct = Number(obra.orcamento) > 0 ? gasto / Number(obra.orcamento) * 100 : 0;
                           return {
-                            rotulo: `${obra.nome} — ${pct.toFixed(1)}% usado`,
+                            rotulo: `${obra.nome} — ${pct.toFixed(1).replace('.', ',')}% usado`,
                             series: [
                               { nome: 'Orçado', valor: Number(obra.orcamento), cor: 'bg-slate-400' },
                               { nome: 'Gasto', valor: gasto, cor: pct > 85 ? 'bg-red-500' : 'bg-amber-500' },
