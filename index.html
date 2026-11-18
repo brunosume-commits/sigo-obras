@@ -44,6 +44,7 @@
         arrowUp: <><line x1="12" x2="12" y1="19" y2="5"/><polyline points="5 12 12 5 19 12"/></>,
         transfer: <><path d="m16 3 4 4-4 4"/><path d="M20 7H4"/><path d="m8 21-4-4 4-4"/><path d="M4 17h16"/></>,
         logout: <><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></>,
+        wallet: <><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>,
         search: <><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></>,
         chevronLeft: <><polyline points="15 18 9 12 15 6"/></>,
         chevronRight: <><polyline points="9 18 15 12 9 6"/></>,
@@ -103,6 +104,15 @@
       );
     };
 
+    const rotuloMes = (mes) => `${NOMES_MES[Number(mes.slice(5, 7)) - 1]} de ${mes.slice(0, 4)}`;
+    const somaMes = (mes, delta) => { const [a, m] = mes.split('-').map(Number); const d = new Date(a, m - 1 + delta, 1); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
+    // Mesma regra do banco (fechar_folha): diária x presenças; mensal - (salário/30 x faltas)
+    const calcularPagamento = (rem, cont) => {
+      if (!rem || !(rem.valor > 0)) return 0;
+      if (rem.tipo === 'Diária') return Math.round(rem.valor * cont.Presente * 100) / 100;
+      return Math.max(0, Math.round((rem.valor - rem.valor / 30 * cont.Falta) * 100) / 100);
+    };
+
     const proximoCodigo = (materiais) => {
       const max = materiais.reduce((acc, m) => {
         const n = parseInt(String(m.codigo || '').replace(/\D/g, ''), 10);
@@ -115,7 +125,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'compras', 'financeiro', 'funcionarios', 'relatorios', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'compras', 'financeiro', 'funcionarios', 'folha', 'relatorios', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -134,7 +144,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -152,7 +162,9 @@
       return data;
     };
 
-    async function carregarDados(perfil, mesPresenca) {
+    async function carregarDados(perfil, mesPresenca, mesFolha) {
+      const eng = perfil === 'Engenheiro';
+      const iniF = mesFolha + '-01', fimF = mesFolha + '-' + pad2(diasDoMes(mesFolha));
       const iniMes = mesPresenca + '-01';
       const fimMes = mesPresenca + '-' + pad2(diasDoMes(mesPresenca));
       const consultas = [
@@ -166,8 +178,12 @@
         perfil === 'Engenheiro' ? sb.from('despesas').select('*').order('vencimento', { ascending: false }) : Promise.resolve({ data: [] }),
         perfil === 'Engenheiro' ? sb.from('perfis').select('*').order('criado_em') : Promise.resolve({ data: [] }),
         sb.from('presencas').select('funcionario_id, dia, status').gte('dia', iniMes).lte('dia', fimMes),
+        eng ? sb.from('remuneracoes').select('*') : Promise.resolve({ data: [] }),
+        eng ? sb.from('presencas').select('funcionario_id, dia, status').gte('dia', iniF).lte('dia', fimF) : Promise.resolve({ data: [] }),
+        eng ? sb.from('folhas').select('*').eq('mes', mesFolha) : Promise.resolve({ data: [] }),
+        eng ? sb.from('folha_itens').select('*').eq('mes', mesFolha) : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF] = (await Promise.all(consultas)).map(ok);
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
         materiais: materiais.map(m => {
@@ -189,6 +205,10 @@
         funcionarios: funcs.map(f => ({ id: f.id, nome: f.nome, funcao: f.funcao, obraId: f.obra_id, presenca: f.presenca })),
         perfis,
         presencas: presencas.map(p => ({ funcionarioId: p.funcionario_id, dia: p.dia, status: p.status })),
+        remuneracoes: Object.fromEntries(rems.map(r => [r.funcionario_id, { tipo: r.tipo, valor: num(r.valor) }])),
+        presencasFolha: presF.map(p => ({ funcionarioId: p.funcionario_id, dia: p.dia, status: p.status })),
+        folha: folhas[0] ? { ...folhas[0], total: num(folhas[0].total) } : null,
+        folhaItens: itensF.map(i => ({ ...i, valor_base: num(i.valor_base), valor_calculado: num(i.valor_calculado), ajuste: num(i.ajuste), total: num(i.total) })),
       };
     }
 
@@ -231,6 +251,9 @@
       const [filtroCategoria, setFiltroCategoria] = useState('');
       const [diaPresenca, setDiaPresenca] = useState(hojeISO());
       const mesPresenca = diaPresenca.slice(0, 7);
+      const [mesFolha, setMesFolha] = useState(hojeISO().slice(0, 7));
+      const [ajustesFolha, setAjustesFolha] = useState({});
+      useEffect(() => { setAjustesFolha({}); }, [mesFolha]);
       const [selectedObra, setSelectedObra] = useState('ALL');
 
       const [movModal, setMovModal] = useState(null);
@@ -318,13 +341,13 @@
       const recarregar = useCallback(async () => {
         if (!user) return;
         try {
-          setData(await carregarDados(user.perfil, mesPresenca));
+          setData(await carregarDados(user.perfil, mesPresenca, mesFolha));
           setSincronizado(new Date());
           setErroConexao('');
         } catch (err) {
           setErroConexao('Não foi possível ler os dados do servidor: ' + err.message);
         }
-      }, [user?.id, user?.perfil, mesPresenca]);
+      }, [user?.id, user?.perfil, mesPresenca, mesFolha]);
 
       useEffect(() => {
         if (!user) return;
@@ -374,7 +397,9 @@
       };
       const abrirFuncionario = (func) => {
         if (!func && !data.obras.length) return alert('Cadastre ao menos uma obra antes.');
-        setNovoFuncForm(func ? { ...func } : { nome: '', funcao: 'Pedreiro', obraId: primeiraObra() });
+        const rem = func ? data.remuneracoes[func.id] : null;
+        setNovoFuncForm(func ? { ...func, tipoPag: rem?.tipo || 'Diária', valorPag: rem?.valor ?? '' }
+                             : { nome: '', funcao: 'Pedreiro', obraId: primeiraObra(), tipoPag: 'Diária', valorPag: '' });
         setNovoFuncModal(true);
       };
       const abrirFornecedor = (forn) => {
@@ -437,9 +462,16 @@
       const salvarFuncionario = async (e) => {
         e.preventDefault();
         const reg = { nome: novoFuncForm.nome.trim(), funcao: novoFuncForm.funcao.trim(), obra_id: novoFuncForm.obraId || null };
-        if (await executar(async () => ok(novoFuncForm.id
-          ? await sb.from('funcionarios').update(reg).eq('id', novoFuncForm.id)
-          : await sb.from('funcionarios').insert(reg)))) setNovoFuncModal(false);
+        const valorPag = novoFuncForm.valorPag === '' ? 0 : Number(novoFuncForm.valorPag);
+        if (!(valorPag >= 0)) return alert('Informe um valor de diária ou salário válido.');
+        if (await executar(async () => {
+          let id = novoFuncForm.id;
+          if (id) ok(await sb.from('funcionarios').update(reg).eq('id', id));
+          else id = ok(await sb.from('funcionarios').insert(reg).select('id').single()).id;
+          if (can('folha.gerir')) {
+            ok(await sb.from('remuneracoes').upsert({ funcionario_id: id, tipo: novoFuncForm.tipoPag, valor: valorPag, atualizado_em: new Date().toISOString() }));
+          }
+        })) setNovoFuncModal(false);
       };
 
       const salvarFornecedor = async (e) => {
@@ -461,6 +493,19 @@
           return alert('Você não pode retirar o seu próprio acesso de Engenheiro.');
         }
         return executar(async () => ok(await sb.from('perfis').update(campos).eq('id', p.id)));
+      };
+
+      // ---------- Folha de pagamento ----------
+      const fecharFolha = (itens) => {
+        const total = itens.reduce((s, i) => s + i.total, 0);
+        if (!confirm(`Fechar a folha de ${rotuloMes(mesFolha)} no total de ${formatBRL(total)}?\n\nSerá lançada uma despesa "Mão de Obra" (A pagar) para cada obra, com vencimento no dia 5 do mês seguinte.`)) return;
+        const aj = {};
+        Object.entries(ajustesFolha).forEach(([fid, a]) => { const v = Number(a.valor); if (v) aj[fid] = { valor: v, obs: a.obs || '' }; });
+        executar(async () => ok(await sb.rpc('fechar_folha', { p_mes: mesFolha, p_ajustes: aj })));
+      };
+      const reabrirFolha = () => {
+        if (!confirm(`Reabrir a folha de ${rotuloMes(mesFolha)}?\n\nAs despesas lançadas por ela serão apagadas do Financeiro, e você poderá fechar de novo.`)) return;
+        executar(async () => ok(await sb.rpc('reabrir_folha', { p_mes: mesFolha })));
       };
 
       // ---------- Exclusões (com bloqueio quando há vínculos) ----------
@@ -619,6 +664,7 @@
         { id: 'compras', label: 'Compras & Fornecedores', icon: 'cart' },
         { id: 'financeiro', label: 'Controle Financeiro', icon: 'dollar' },
         { id: 'funcionarios', label: 'Funcionários', icon: 'users' },
+        { id: 'folha', label: 'Folha de Pagamento', icon: 'wallet' },
         { id: 'relatorios', label: 'Relatórios', icon: 'file' },
         { id: 'usuarios', label: 'Usuários', icon: 'users', badge: data.perfis.filter(p => !p.ativo).length || null },
       ].filter(item => podeVerAba(item.id));
@@ -1235,13 +1281,14 @@
                           <th className="px-6 py-3">Nome</th>
                           <th className="px-6 py-3">Função</th>
                           <th className="px-6 py-3">Obra Alocada</th>
+                          {can('folha.gerir') && <th className="px-6 py-3">Pagamento</th>}
                           <th className="px-6 py-3">Presença em {fmtData(diaPresenca)}</th>
                           {can('func.gerir') && <th className="px-6 py-3 no-print">Ações</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
                         {funcsVisiveis.length === 0 && (
-                          <tr><td colSpan={5} className="px-6 py-8 text-center text-sm text-slate-400">Nenhum funcionário cadastrado.</td></tr>
+                          <tr><td colSpan={6} className="px-6 py-8 text-center text-sm text-slate-400">Nenhum funcionário cadastrado.</td></tr>
                         )}
                         {funcsVisiveis.map(f => {
                           const st = presencaMap[f.id + '|' + diaPresenca] || '';
@@ -1254,6 +1301,13 @@
                               <td className="px-6 py-3 font-bold text-slate-800">{f.nome}</td>
                               <td className="px-6 py-3 text-slate-600">{f.funcao}</td>
                               <td className="px-6 py-3 font-medium">{getObraNome(f.obraId)}</td>
+                              {can('folha.gerir') && (
+                                <td className="px-6 py-3 text-xs whitespace-nowrap">
+                                  {data.remuneracoes[f.id]?.valor > 0
+                                    ? <span><strong>{formatBRL(data.remuneracoes[f.id].valor)}</strong> {data.remuneracoes[f.id].tipo === 'Diária' ? '/ dia' : '/ mês'}</span>
+                                    : <span className="text-amber-700 font-bold">Não informado</span>}
+                                </td>
+                              )}
                               <td className="px-6 py-3">
                                 <select disabled={!can('func.presenca') || enviando} value={st}
                                   onChange={e => marcarPresenca(f, e.target.value, diaPresenca)}
@@ -1331,6 +1385,118 @@
                   </div>
                 </div>
               )}
+
+              {aba === 'folha' && (() => {
+                const fechada = data.folha;
+                const contF = {};
+                data.presencasFolha.forEach(p => { const c = contF[p.funcionarioId] || (contF[p.funcionarioId] = { Presente: 0, Falta: 0, Atestado: 0 }); c[p.status]++; });
+                const funcsFolha = funcsVisiveis;
+                const itens = fechada
+                  ? data.folhaItens.filter(i => selectedObra === 'ALL' || i.obra_id === selectedObra).map(i => ({
+                      fid: i.funcionario_id, nome: i.nome, funcao: i.funcao, obraId: i.obra_id, tipo: i.tipo, base: i.valor_base,
+                      P: i.presentes, F: i.faltas, A: i.atestados, calc: i.valor_calculado, ajuste: i.ajuste, obs: i.ajuste_obs, total: i.total }))
+                  : funcsFolha.filter(f => data.remuneracoes[f.id]?.valor > 0).map(f => {
+                      const rem = data.remuneracoes[f.id]; const c = contF[f.id] || { Presente: 0, Falta: 0, Atestado: 0 };
+                      const calc = calcularPagamento(rem, c); const aj = Number(ajustesFolha[f.id]?.valor) || 0;
+                      return { fid: f.id, nome: f.nome, funcao: f.funcao, obraId: f.obraId, tipo: rem.tipo, base: rem.valor,
+                        P: c.Presente, F: c.Falta, A: c.Atestado, calc, ajuste: aj, obs: ajustesFolha[f.id]?.obs || '', total: Math.round((calc + aj) * 100) / 100 };
+                    });
+                const semValor = fechada ? [] : funcsFolha.filter(f => !(data.remuneracoes[f.id]?.valor > 0));
+                const totalGeral = itens.reduce((s, i) => s + i.total, 0);
+                const porObra = Object.entries(itens.reduce((acc, i) => { acc[i.obraId] = (acc[i.obraId] || 0) + i.total; return acc; }, {}));
+                const mesAtual = mesFolha === hoje.slice(0, 7);
+                const setAj = (fid, campo, v) => setAjustesFolha(prev => ({ ...prev, [fid]: { ...prev[fid], [campo]: v } }));
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Folha de pagamento — {rotuloMes(mesFolha)}</h3>
+                        <p className="text-xs text-slate-500">
+                          {fechada
+                            ? <span className="font-bold text-emerald-700">Fechada em {fmtData(tsLocal(fechada.fechada_em))} · despesas lançadas no Financeiro</span>
+                            : <span className="font-bold text-amber-700">Aberta (prévia){mesAtual ? ' · o mês ainda está em andamento' : ''}</span>}
+                        </p>
+                      </div>
+                      <div className="no-print flex items-center gap-2">
+                        <button type="button" onClick={() => setMesFolha(somaMes(mesFolha, -1))} title="Mês anterior" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100"><Icon name="chevronLeft" className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => setMesFolha(somaMes(mesFolha, 1))} disabled={mesAtual} title="Próximo mês" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-30"><Icon name="chevronRight" className="w-4 h-4" /></button>
+                        <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
+                        {fechada
+                          ? <button type="button" disabled={enviando} onClick={reabrirFolha} className="px-4 py-2 border border-red-300 text-red-700 rounded-lg text-sm font-bold hover:bg-red-50 disabled:opacity-50">Reabrir folha</button>
+                          : <button type="button" disabled={enviando || !itens.length || selectedObra !== 'ALL'} onClick={() => fecharFolha(itens)}
+                              title={selectedObra !== 'ALL' ? 'Para fechar, selecione Todas as Obras' : ''}
+                              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:opacity-40">Fechar folha e lançar no Financeiro</button>}
+                      </div>
+                    </div>
+
+                    {!fechada && selectedObra !== 'ALL' && (
+                      <p className="no-print text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">Mostrando só uma obra. Para fechar a folha, selecione <strong>Todas as Obras</strong> no topo: a folha é fechada de uma vez para todas.</p>
+                    )}
+                    {semValor.length > 0 && (
+                      <p className="no-print text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                        <strong>{semValor.length} funcionário(s) sem diária ou salário</strong> ficam fora da folha: {semValor.map(f => f.nome).join(', ')}. Informe o valor em <em>Funcionários → Editar</em>.
+                      </p>
+                    )}
+
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                      <table className="w-full text-sm text-left">
+                        <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                          <tr>
+                            <th className="px-4 py-3">Funcionário</th>
+                            <th className="px-4 py-3">Obra</th>
+                            <th className="px-4 py-3">Recebe por</th>
+                            <th className="px-3 py-3 text-center text-emerald-700">P</th>
+                            <th className="px-3 py-3 text-center text-red-700">F</th>
+                            <th className="px-3 py-3 text-center text-blue-700">A</th>
+                            <th className="px-4 py-3 text-right">Calculado</th>
+                            <th className="px-4 py-3">Ajuste (+/−)</th>
+                            <th className="px-4 py-3 text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {itens.length === 0 && (
+                            <tr><td colSpan={9} className="px-6 py-8 text-center text-sm text-slate-400">
+                              Nenhum funcionário com diária ou salário cadastrado. Informe os valores em Funcionários → Editar.
+                            </td></tr>
+                          )}
+                          {itens.map(i => (
+                            <tr key={i.fid}>
+                              <td className="px-4 py-3"><p className="font-bold text-slate-800">{i.nome}</p><p className="text-xs text-slate-500">{i.funcao}</p></td>
+                              <td className="px-4 py-3 text-xs">{getObraNome(i.obraId)}</td>
+                              <td className="px-4 py-3 text-xs whitespace-nowrap">{i.tipo === 'Diária' ? 'Diária' : 'Mês'} · <strong>{formatBRL(i.base)}</strong></td>
+                              <td className="px-3 py-3 text-center font-bold text-emerald-700">{i.P}</td>
+                              <td className="px-3 py-3 text-center font-bold text-red-700">{i.F}</td>
+                              <td className="px-3 py-3 text-center font-bold text-blue-700">{i.A}</td>
+                              <td className="px-4 py-3 text-right whitespace-nowrap">
+                                {formatBRL(i.calc)}
+                                <p className="text-[10px] text-slate-400">{i.tipo === 'Diária' ? `${i.P} × ${formatBRL(i.base)}` : (i.F ? `− ${i.F} falta(s) × ${formatBRL(i.base / 30)}` : 'sem desconto')}</p>
+                              </td>
+                              <td className="px-4 py-3">
+                                {fechada
+                                  ? <span className="text-xs">{i.ajuste ? <><strong>{formatBRL(i.ajuste)}</strong>{i.obs ? ` · ${i.obs}` : ''}</> : '—'}</span>
+                                  : <div className="flex gap-1 no-print">
+                                      <input type="number" step="0.01" value={ajustesFolha[i.fid]?.valor ?? ''} onChange={e => setAj(i.fid, 'valor', e.target.value)} placeholder="0,00" className="w-24 border border-slate-300 rounded px-2 py-1 text-xs" />
+                                      <input type="text" value={ajustesFolha[i.fid]?.obs ?? ''} onChange={e => setAj(i.fid, 'obs', e.target.value)} placeholder="motivo (hora extra, vale…)" className="w-40 border border-slate-300 rounded px-2 py-1 text-xs" />
+                                    </div>}
+                              </td>
+                              <td className="px-4 py-3 text-right font-black text-slate-900 whitespace-nowrap">{formatBRL(i.total)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        {itens.length > 0 && (
+                          <tfoot className="bg-slate-50">
+                            {porObra.map(([oid, v]) => (
+                              <tr key={oid}><td colSpan={8} className="px-4 py-2 text-right text-xs text-slate-600">{getObraNome(oid)}</td><td className="px-4 py-2 text-right text-xs font-bold whitespace-nowrap">{formatBRL(v)}</td></tr>
+                            ))}
+                            <tr><td colSpan={8} className="px-4 py-3 text-right font-bold text-slate-800">Total da folha</td><td className="px-4 py-3 text-right font-black text-lg text-slate-900 whitespace-nowrap">{formatBRL(totalGeral)}</td></tr>
+                          </tfoot>
+                        )}
+                      </table>
+                    </div>
+                    <p className="text-xs text-slate-400">Diarista: diária × dias presentes. Mensalista: salário − (salário ÷ 30 × faltas); atestado e dia sem registro não descontam. Não inclui INSS, FGTS, IRRF, férias nem 13º — confira com o contador.</p>
+                  </div>
+                );
+              })()}
 
               {aba === 'usuarios' && (
                 <div className="space-y-4">
@@ -1612,6 +1778,19 @@
                   <select value={novoFuncForm.obraId} onChange={e => setNovoFuncForm({ ...novoFuncForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
                     {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                   </select>
+                  {can('folha.gerir') && (
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                      <label className="text-xs font-bold uppercase text-slate-500">Recebe por
+                        <select value={novoFuncForm.tipoPag} onChange={e => setNovoFuncForm({ ...novoFuncForm, tipoPag: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900">
+                          <option value="Diária">Diária</option>
+                          <option value="Mensal">Mês (salário)</option>
+                        </select>
+                      </label>
+                      <label className="text-xs font-bold uppercase text-slate-500">{novoFuncForm.tipoPag === 'Mensal' ? 'Salário mensal (R$)' : 'Valor da diária (R$)'}
+                        <input type="number" min="0" step="0.01" value={novoFuncForm.valorPag} onChange={e => setNovoFuncForm({ ...novoFuncForm, valorPag: e.target.value })} placeholder="0,00" className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
+                      </label>
+                    </div>
+                  )}
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setNovoFuncModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
                     <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
