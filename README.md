@@ -25,6 +25,7 @@ As permissões são aplicadas **no banco** (Row Level Security), não só na tel
 1. No menu lateral do projeto, abra **SQL Editor** → **New query**.
 2. Cole todo o conteúdo de [`supabase/schema.sql`](supabase/schema.sql) e clique em **Run**.
    Depois, rode também [`supabase/migracao-002-presenca-categorias.sql`](supabase/migracao-002-presenca-categorias.sql).
+   E, por fim, [`supabase/migracao-003-folha-pagamento.sql`](supabase/migracao-003-folha-pagamento.sql).
 3. (Opcional, só para testar) rode também [`supabase/dados-exemplo.sql`](supabase/dados-exemplo.sql).
 
 ### 3. Ajustar o login
