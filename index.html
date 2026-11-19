@@ -195,7 +195,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -332,8 +332,10 @@
         sb.from('indices_consumo').select('*'),
         (eng || perfil === 'Mestre de Obras') ? sb.from('producoes').select('*').order('dia', { ascending: false }).order('criado_em', { ascending: false }).limit(3000) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Mestre de Obras') ? sb.from('producao_funcionarios').select('*') : Promise.resolve({ data: [] }),
+        eng ? sb.rpc('resumo_alertas', {}) : Promise.resolve({ data: null }),
+        eng ? sb.from('envios_alertas').select('*').order('dia', { ascending: false }).limit(1) : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs, alertasDia, envios] = (await Promise.all(consultas)).map(ok);
       const inspItens = inspecoes.length ? ok(await sb.from('inspecao_itens').select('*').in('inspecao_id', inspecoes.map(i => i.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
@@ -384,6 +386,7 @@
         producoes: producoes.map(x => ({ ...x, quantidade: num(x.quantidade), hh: num(x.hh) })),
         servicos: servicos.map(x => ({ ...x, rup_ref: num(x.rup_ref) })),
         prodFuncs,
+        alertasDia, ultimoEnvio: envios[0] || null,
       };
     }
 
@@ -1914,6 +1917,35 @@
                   </div>
                 </div>
               )}
+
+              {aba === 'dashboard' && data.alertasDia && (() => {
+                const itens = data.alertasDia.itens || [];
+                const grupos = [...new Set(itens.map(i => i.grupo))];
+                const destino = { 'Caixa': 'caixa', 'Contas a pagar': 'financeiro', 'Recebimentos atrasados': 'caixa', 'Documentos': 'documentos', 'Pendências atrasadas': 'qualidade', 'Estoque baixo': 'materiais', 'Troca de EPI': 'epi', 'Cronograma': 'orcamento', 'Perda de material (30 dias)': 'consumo', 'Esperando sua aprovação': 'compras' };
+                const cor = { alta: 'text-red-700', media: 'text-amber-800', baixa: 'text-slate-700' };
+                const env = data.ultimoEnvio;
+                return (
+                  <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3 no-print">
+                    <div className="flex flex-wrap justify-between items-center gap-2">
+                      <h3 className="font-bold text-slate-800">Atenção hoje {itens.length > 0 && <span className="ml-1 text-xs font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded">{itens.length}</span>}</h3>
+                      <p className="text-[11px] text-slate-500">{env ? (env.erro && !env.destinatarios?.length ? `E-mail diário com erro em ${fmtData(env.dia)}` : `E-mail diário enviado em ${fmtData(env.dia)} para ${(env.destinatarios || []).join(', ')}`) : 'E-mail diário: aguardando configuração'}</p>
+                    </div>
+                    {itens.length === 0 ? <p className="text-sm text-emerald-700 font-semibold">Tudo em dia. Nada pendente hoje.</p> : (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-3">
+                        {grupos.map(g => (
+                          <div key={g}>
+                            <button type="button" onClick={() => destino[g] && podeVerAba(destino[g]) && setActiveTab(destino[g])} className="text-xs font-bold uppercase text-slate-500 hover:text-slate-900">{g} →</button>
+                            <ul className="mt-1 space-y-0.5">
+                              {itens.filter(i => i.grupo === g).slice(0, 5).map((i, k) => <li key={k} className={`text-sm ${cor[i.grav] || ''}`}>• {i.texto}</li>)}
+                              {itens.filter(i => i.grupo === g).length > 5 && <li className="text-xs text-slate-500">e mais {itens.filter(i => i.grupo === g).length - 5}…</li>}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {aba === 'dashboard' && (
                 <div className="space-y-6">
