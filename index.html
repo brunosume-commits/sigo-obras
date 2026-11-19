@@ -73,6 +73,9 @@
         chevronLeft: <><polyline points="15 18 9 12 15 6"/></>,
         chevronRight: <><polyline points="9 18 15 12 9 6"/></>,
         fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/></>,
+        briefcase: <><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></>,
+        settings: <><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></>,
+        chevronDown: <><polyline points="6 9 12 15 18 9"/></>,
         print: <><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></>
       };
       return (
@@ -99,6 +102,13 @@
     const somaDias = (dias) => { const d = new Date(); d.setDate(d.getDate() + dias); return isoLocal(d); };
     const segundaDe = (iso) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoLocal(d); };
     const CAUSAS_PPC = ['Material', 'Mão de obra', 'Equipamento', 'Projeto ou definição', 'Clima', 'Serviço anterior', 'Mudança de prioridade', 'Meta irreal', 'Outros'];
+    // Grupos do menu lateral (o Painel Principal fica sozinho no topo)
+    const GRUPOS_MENU = [
+      { id: 'canteiro', label: 'Canteiro', icon: 'building', abas: ['planejamento', 'diario', 'materiais', 'epi', 'qualidade', 'consumo', 'produtividade'] },
+      { id: 'escritorio', label: 'Escritório', icon: 'briefcase', abas: ['obras', 'orcamento', 'compras', 'medicoes', 'financeiro', 'caixa', 'funcionarios', 'folha', 'documentos', 'relatorios'] },
+      { id: 'admin', label: 'Administração', icon: 'settings', abas: ['portal', 'usuarios'] },
+    ];
+    const grupoDaAba = (id) => GRUPOS_MENU.find(g => g.abas.includes(id))?.id || null;
     const somaDiasDe = (iso, dias) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + dias); return isoLocal(d); };
     const fmtData = (iso) => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) + iso.slice(10) : (iso || '-');
     const CATEGORIAS_PADRAO = ['Cimentos e argamassas', 'Agregados', 'Alvenaria', 'Aço e ferragens', 'Hidráulica', 'Elétrica', 'Acabamentos', 'Madeiras', 'Ferramentas e EPI', 'Geral'];
@@ -489,6 +499,19 @@
       const [erroConexao, setErroConexao] = useState('');
 
       const [activeTab, setActiveTab] = useState('materiais');
+      const [gruposAbertos, setGruposAbertos] = useState(() => {
+        try { return JSON.parse(localStorage.getItem('sigo_menu_grupos')) || { canteiro: true }; } catch (e) { return { canteiro: true }; }
+      });
+      const [grupoMobile, setGrupoMobile] = useState(null);
+      const alternarGrupo = (id) => setGruposAbertos(g => {
+        const n = { ...g, [id]: !g[id] };
+        try { localStorage.setItem('sigo_menu_grupos', JSON.stringify(n)); } catch (e) {}
+        return n;
+      });
+      useEffect(() => {
+        const g = grupoDaAba(activeTab);
+        if (g) { setGruposAbertos(x => x[g] ? x : { ...x, [g]: true }); setGrupoMobile(g); }
+      }, [activeTab]);
       const [buscaEstoque, setBuscaEstoque] = useState('');
       const [filtroCategoria, setFiltroCategoria] = useState('');
       const [diaPresenca, setDiaPresenca] = useState(hojeISO());
@@ -1833,12 +1856,12 @@
               </div>
             </div>
 
-            <nav className="flex-1 p-3 space-y-1 overflow-x-auto flex md:block">
-              {menuItems.map(item => (
+            {(() => {
+              const BotaoMenu = ({ item, compacto }) => (
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
+                  className={`${compacto ? 'shrink-0' : 'w-full'} flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm font-medium transition whitespace-nowrap ${
                     aba === item.id ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-300 hover:bg-slate-800'
                   }`}
                 >
@@ -1852,8 +1875,51 @@
                     </span>
                   ) : null}
                 </button>
-              ))}
-            </nav>
+              );
+              const soltos = menuItems.filter(i => !grupoDaAba(i.id));
+              const grupos = GRUPOS_MENU.map(g => ({ ...g, itens: g.abas.map(id => menuItems.find(i => i.id === id)).filter(Boolean) })).filter(g => g.itens.length);
+              const usarGrupos = grupos.length > 1;
+              const somaBadges = (g) => g.itens.reduce((s, i) => s + (Number(i.badge) || 0), 0);
+              const gMob = grupos.find(g => g.id === (grupoMobile || grupoDaAba(aba))) || grupos[0];
+              if (!usarGrupos) return (
+                <nav className="flex-1 p-3 space-y-1 overflow-x-auto flex md:block">
+                  {menuItems.map(item => <BotaoMenu key={item.id} item={item} compacto={false} />)}
+                </nav>
+              );
+              return (<>
+                {/* Celular: escolhe o grupo e mostra os itens dele numa faixa */}
+                <nav className="md:hidden p-2 space-y-2">
+                  <div className="flex gap-1.5 overflow-x-auto">
+                    {soltos.map(item => <BotaoMenu key={item.id} item={item} compacto />)}
+                    {grupos.map(g => { const b = somaBadges(g), at = gMob?.id === g.id; return (
+                      <button key={g.id} type="button" onClick={() => setGrupoMobile(g.id)}
+                        className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-bold border ${at ? 'border-amber-500 text-amber-400' : 'border-slate-700 text-slate-300'}`}>
+                        <Icon name={g.icon} className="w-4 h-4" />{g.label}
+                        {b > 0 && <span className="text-[10px] px-1.5 rounded-full bg-red-500 text-white">{b}</span>}
+                      </button>
+                    ); })}
+                  </div>
+                  {gMob && <div className="flex gap-1 overflow-x-auto">{gMob.itens.map(item => <BotaoMenu key={item.id} item={item} compacto />)}</div>}
+                </nav>
+                {/* Computador: grupos que abrem e fecham */}
+                <nav className="hidden md:block flex-1 p-3 space-y-1 overflow-y-auto">
+                  {soltos.map(item => <BotaoMenu key={item.id} item={item} compacto={false} />)}
+                  {grupos.map(g => { const aberto = !!gruposAbertos[g.id], b = somaBadges(g); return (
+                    <div key={g.id} className="pt-2">
+                      <button type="button" onClick={() => alternarGrupo(g.id)} aria-expanded={aberto}
+                        className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg text-[11px] font-bold uppercase tracking-wider text-slate-400 hover:text-slate-200 hover:bg-slate-800/60">
+                        <span className="flex items-center gap-2"><Icon name={g.icon} className="w-3.5 h-3.5" />{g.label}</span>
+                        <span className="flex items-center gap-1.5">
+                          {!aberto && b > 0 && <span className="text-[10px] normal-case px-1.5 py-0.5 rounded-full bg-red-500 text-white">{b}</span>}
+                          <span className={`transition-transform ${aberto ? '' : '-rotate-90'}`}><Icon name="chevronDown" className="w-3.5 h-3.5" /></span>
+                        </span>
+                      </button>
+                      {aberto && <div className="space-y-1 mt-1">{g.itens.map(item => <BotaoMenu key={item.id} item={item} compacto={false} />)}</div>}
+                    </div>
+                  ); })}
+                </nav>
+              </>);
+            })()}
 
             <div className="p-4 border-t border-slate-800 flex items-center justify-between text-xs">
               <div>
