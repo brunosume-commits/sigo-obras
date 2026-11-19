@@ -402,7 +402,7 @@
       const notaItens = notas.length ? ok(await sb.from('nota_itens').select('*').in('nota_id', notas.map(n => n.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
-        obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
+        obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento), bdi_pct: num(o.bdi_pct) || 0 })),
         materiais: materiais.map(m => {
           const est = {};
           estoques.filter(e => e.material_id === m.id).forEach(e => { est[e.obra_id] = num(e.saldo); });
@@ -536,6 +536,7 @@
       const [orcObra, setOrcObra] = useState('');
       const [cotForm, setCotForm] = useState(null);
       const [nfForm, setNfForm] = useState(null);
+      const [bdiEdit, setBdiEdit] = useState(null);
       const [planSemana, setPlanSemana] = useState(() => segundaDe(hojeISO()));
       const [tarefaForm, setTarefaForm] = useState(null);
       const [causaForm, setCausaForm] = useState(null);       // importação do XML da NF-e
@@ -1191,6 +1192,12 @@
             forns: data.cotacaoForns.filter(f => f.cotacao_id === c.id).map(f => f.fornecedor_id) }
           : { obraId: primeiraObra(), titulo: '', obs: '', itens: [{ materialId: data.materiais[0]?.id || '', qtd: '' }], forns: data.fornecedores.slice(0, 3).map(f => f.id) });
       };
+      const salvarBdi = async (obraId) => {
+        const v = numBR(bdiEdit);
+        if (!(v >= 0 && v <= 100)) { alert('Informe o BDI entre 0 e 100%.'); return; }
+        if (await executar(async () => ok(await sb.from('obras').update({ bdi_pct: Math.round(v * 100) / 100 }).eq('id', obraId)))) setBdiEdit(null);
+      };
+
       // ---------- Planejamento semanal ----------
       const abrirTarefa = (t, obraId) => setTarefaForm(t
         ? { id: t.id, obraId: t.obra_id, descricao: t.descricao, responsavel: t.responsavel, etapaId: t.etapa_id || '', quantidade: t.quantidade === null ? '' : String(t.quantidade).replace('.', ','), unidade: t.unidade }
@@ -3266,7 +3273,23 @@
                       </div>
                     ) : (<>
                       <div className={`grid grid-cols-1 sm:grid-cols-2 ${eng ? 'lg:grid-cols-4' : ''} gap-3`}>
-                        {eng && <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Orçado</p><p className="text-xl font-extrabold">{formatBRL(orcado)}</p></div>}
+                        {eng && (() => { const bdi = data.obras.find(o => o.id === obraId)?.bdi_pct || 0; return (
+                          <div className="bg-white border border-slate-200 rounded-xl p-4">
+                            <p className="text-xs text-slate-500 font-bold uppercase">Orçado (custo direto)</p>
+                            <p className="text-xl font-extrabold">{formatBRL(orcado)}</p>
+                            {bdiEdit === null ? (
+                              <p className="text-xs text-slate-600 mt-1">BDI <b>{bdi.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%</b> → venda <b className="text-slate-900">{formatBRL(orcado * (1 + bdi / 100))}</b> <button type="button" onClick={() => setBdiEdit(String(bdi).replace('.', ','))} className="ml-1 font-bold text-amber-700 hover:underline">alterar</button></p>
+                            ) : (
+                              <form onSubmit={ev => { ev.preventDefault(); salvarBdi(obraId); }} className="flex items-center gap-1 mt-1 text-xs">
+                                <span className="font-bold text-slate-600">BDI</span>
+                                <input autoFocus value={bdiEdit} inputMode="decimal" onChange={ev => setBdiEdit(ev.target.value)} className="w-16 border rounded px-1.5 py-0.5 text-right" aria-label="BDI em %" />
+                                <span>%</span>
+                                <button type="submit" disabled={enviando} className="font-bold bg-slate-900 text-white rounded px-2 py-0.5">OK</button>
+                                <button type="button" onClick={() => setBdiEdit(null)} className="font-bold text-slate-500 px-1">×</button>
+                              </form>
+                            )}
+                          </div>
+                        ); })()}
                         {eng && <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Realizado (lançado)</p><p className="text-xl font-extrabold">{formatBRL(realizado)}</p><p className="text-xs text-slate-500">{orcado ? pct(realizado / orcado * 100) + ' do orçado' : ''}</p></div>}
                         <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Avanço físico</p><p className="text-xl font-extrabold">{pct(avGeral)}</p>{plGeral !== null && <p className="text-xs text-slate-500">previsto para hoje: {pct(plGeral)}</p>}</div>
                         <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Prazo</p><p className="text-xl font-extrabold">{fim ? fmtData(fim) : '—'}</p><p className="text-xs text-slate-500">{fim ? (diasEntre(hoje, fim) >= 0 ? `faltam ${diasEntre(hoje, fim)} dias` : `terminou há ${-diasEntre(hoje, fim)} dias`) : 'defina as datas das etapas'}</p></div>
@@ -3321,13 +3344,14 @@
                           <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Previsto x realizado por etapa</h4></div>
                           <table className="w-full text-sm text-left">
                             <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
-                              <tr><th className="px-4 py-3">Etapa</th><th className="px-4 py-3 text-right">Orçado</th><th className="px-4 py-3 text-right">Realizado</th><th className="px-4 py-3 text-right">Saldo</th><th className="px-4 py-3 text-right">% gasto</th><th className="px-4 py-3 text-right">Avanço físico</th><th className="px-4 py-3">Ações</th></tr>
+                              <tr><th className="px-4 py-3">Etapa</th><th className="px-4 py-3 text-right">Orçado</th><th className="px-4 py-3 text-right">Preço c/ BDI</th><th className="px-4 py-3 text-right">Realizado</th><th className="px-4 py-3 text-right">Saldo</th><th className="px-4 py-3 text-right">% gasto</th><th className="px-4 py-3 text-right">Avanço físico</th><th className="px-4 py-3">Ações</th></tr>
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                               {etapas.map((e, k) => { const r = realEt(e.id), o = vEt[e.id], g = o ? r / o * 100 : (r ? 100 : 0); const alerta = r > o || g - e.avanco > 10; return (
                                 <tr key={e.id}>
                                   <td className="px-4 py-2 font-semibold">{e.nome}</td>
                                   <td className="px-4 py-2 text-right">{formatBRL(o)}</td>
+                                  <td className="px-4 py-2 text-right text-slate-600">{formatBRL(o * (1 + (data.obras.find(x => x.id === obraId)?.bdi_pct || 0) / 100))}</td>
                                   <td className="px-4 py-2 text-right">{formatBRL(r)}</td>
                                   <td className={`px-4 py-2 text-right ${o - r < 0 ? 'text-red-700 font-bold' : ''}`}>{formatBRL(o - r)}</td>
                                   <td className={`px-4 py-2 text-right ${alerta ? 'text-red-700 font-bold' : ''}`}>{pct(g)}{alerta && <span className="block text-[10px] font-semibold">{r > o ? 'acima do orçado' : 'gasto à frente da obra'}</span>}</td>
@@ -3340,8 +3364,8 @@
                                   </td>
                                 </tr>
                               ); })}
-                              {semEtapa > 0 && <tr className="text-slate-500"><td className="px-4 py-2 italic">Despesas sem etapa (folha, compras…)</td><td className="px-4 py-2 text-right">—</td><td className="px-4 py-2 text-right">{formatBRL(semEtapa)}</td><td colSpan={4} className="px-4 py-2 text-xs">Ligue a despesa a uma etapa em <b>Financeiro → Editar</b>.</td></tr>}
-                              <tr className="bg-slate-50 font-bold"><td className="px-4 py-2">Total</td><td className="px-4 py-2 text-right">{formatBRL(orcado)}</td><td className="px-4 py-2 text-right">{formatBRL(realizado)}</td><td className="px-4 py-2 text-right">{formatBRL(orcado - realizado)}</td><td className="px-4 py-2 text-right">{orcado ? pct(realizado / orcado * 100) : '—'}</td><td className="px-4 py-2 text-right">{pct(avGeral)}</td><td /></tr>
+                              {semEtapa > 0 && <tr className="text-slate-500"><td className="px-4 py-2 italic">Despesas sem etapa (folha, compras…)</td><td className="px-4 py-2 text-right">—</td><td className="px-4 py-2 text-right">—</td><td className="px-4 py-2 text-right">{formatBRL(semEtapa)}</td><td colSpan={4} className="px-4 py-2 text-xs">Ligue a despesa a uma etapa em <b>Financeiro → Editar</b>.</td></tr>}
+                              <tr className="bg-slate-50 font-bold"><td className="px-4 py-2">Total</td><td className="px-4 py-2 text-right">{formatBRL(orcado)}</td><td className="px-4 py-2 text-right">{formatBRL(orcado * (1 + (data.obras.find(x => x.id === obraId)?.bdi_pct || 0) / 100))}</td><td className="px-4 py-2 text-right">{formatBRL(realizado)}</td><td className="px-4 py-2 text-right">{formatBRL(orcado - realizado)}</td><td className="px-4 py-2 text-right">{orcado ? pct(realizado / orcado * 100) : '—'}</td><td className="px-4 py-2 text-right">{pct(avGeral)}</td><td /></tr>
                             </tbody>
                           </table>
                         </div>
