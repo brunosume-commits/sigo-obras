@@ -299,3 +299,38 @@ begin
   from generate_series(ini, hoje, interval '1 day') g
   where extract(isodow from g) < 6;
 end $$;
+-- ---------------- Qualidade e pendências da obra de exemplo ----------------
+do $$
+declare o uuid; i uuid; eng uuid; m record; et uuid;
+begin
+  select id into o from obras where nome = 'Residencial Vista do Cabo (exemplo)';
+  if o is null or exists (select 1 from inspecoes where obra_id = o) then return; end if;
+  select id into eng from perfis where perfil = 'Engenheiro' and ativo order by criado_em limit 1;
+  for m in select * from (values
+      ('Concretagem', 'FVS', 'Blocos B1 a B12', date '2026-09-29', 'Fundações', 'José Carlos Ferreira', null::int, '', ''),
+      ('Recebimento de aço', 'FVM', 'NF 48.211 — 400 br CA-50 10mm', date '2026-10-16', 'Estrutura', 'Josefa Maria Santos', null, '', ''),
+      ('Armação (antes da concretagem)', 'FVS', 'Laje do 1º pavimento', date '2026-11-04', 'Estrutura', 'Severino Alves da Silva', 3, 'Faltam espaçadores nas vigas V12 a V15', 'Resolvida'),
+      ('Concretagem', 'FVS', 'Pilares e laje do 1º pavimento', date '2026-11-12', 'Estrutura', 'Severino Alves da Silva', null, '', ''),
+      ('Recebimento de cimento', 'FVM', 'NF 9.872 — 200 sacos', date '2026-11-11', 'Estrutura', 'Josefa Maria Santos', 2, '6 sacos empedrados — devolver ao fornecedor', 'Aberta'),
+      ('Formas e escoramento', 'FVS', 'Laje do 2º pavimento', date '2026-11-17', 'Estrutura', 'Severino Alves da Silva', 4, 'Escoras sem travamento no eixo C', 'Em andamento')
+    ) v(modelo, tipo, local, dia, etapa, quem, nc, problema, st) loop
+    select id into et from etapas where obra_id = o and nome = m.etapa;
+    insert into inspecoes (obra_id, modelo_id, nome, tipo, local, etapa_id, dia, responsavel, criado_por, criado_em)
+    values (o, (select id from checklist_modelos where nome = m.modelo), m.modelo, m.tipo, m.local, et, m.dia, m.quem, eng, (m.dia + time '16:00') at time zone 'America/Sao_Paulo')
+    returning id into i;
+    insert into inspecao_itens (inspecao_id, ordem, descricao, resultado, obs)
+    select i, x.ord::int, x.txt, case when x.ord::int = m.nc then 'Não conforme' else 'Conforme' end, case when x.ord::int = m.nc then m.problema else '' end
+    from checklist_modelos c, jsonb_array_elements_text(c.itens) with ordinality x(txt, ord) where c.nome = m.modelo;
+    if m.nc is not null then
+      insert into pendencias (obra_id, titulo, descricao, local, responsavel, prazo, prioridade, status, inspecao_id, item_ordem, aberta_por, criado_em, resolvida_em, resolvida_por)
+      values (o, (select itens->>(m.nc - 1) from checklist_modelos where nome = m.modelo), m.problema, m.modelo || ' — ' || m.local,
+              case when m.tipo = 'FVM' then 'Josefa Maria Santos' else 'Armação & Forma Silva (exemplo)' end, m.dia + 3, 'Alta', m.st, i, m.nc, m.quem,
+              (m.dia + time '16:05') at time zone 'America/Sao_Paulo',
+              case when m.st = 'Resolvida' then (m.dia + 1 + time '11:00') at time zone 'America/Sao_Paulo' end, case when m.st = 'Resolvida' then 'Severino Alves da Silva' end);
+    end if;
+  end loop;
+  insert into pendencias (obra_id, titulo, descricao, local, responsavel, prazo, prioridade, status, aberta_por, criado_em, resolvida_em, resolvida_por) values
+    (o, 'Instalar guarda-corpo na borda da laje', 'Exigência da NR-18 antes de liberar o pavimento', 'Laje do 1º pavimento', 'Severino Alves da Silva', '2026-11-14', 'Alta', 'Aberta', 'Sumé', '2026-11-12 17:00-03', null, null),
+    (o, 'Reparar tapume danificado pela chuva', '', 'Frente do terreno', 'Luiz Henrique Costa', '2026-11-25', 'Média', 'Aberta', 'Severino Alves da Silva', '2026-11-18 08:00-03', null, null),
+    (o, 'Retirar entulho do térreo', 'Caçamba agendada', 'Térreo', 'Pedro Henrique Araújo', '2026-11-08', 'Baixa', 'Resolvida', 'Severino Alves da Silva', '2026-11-05 08:00-03', '2026-11-07 15:00-03', 'Severino Alves da Silva');
+end $$;
