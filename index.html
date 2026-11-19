@@ -2609,7 +2609,13 @@
                                 {ticks.map((t, i) => <g key={i}><line x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="#e2e8f0" strokeWidth="1" /><text x={L - 6} y={y(t) + 3} textAnchor="end" fontSize="10" fill="#64748b">{t >= 1000 ? Math.round(t / 1000).toLocaleString('pt-BR') + ' mil' : Math.round(t)}</text></g>)}
                                 {meses.map((m, i) => (n <= 14 || i % Math.ceil(n / 12) === 0) && <text key={m} x={x(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="#64748b">{NOMES_MES[Number(m.slice(5)) - 1].slice(0, 3)}/{m.slice(2, 4)}</text>)}
                                 {series.map(sr => sr.k > 0 && <path key={sr.nome} d={linha(sr.arr, sr.k)} fill="none" stroke={sr.cor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={sr.tracejado ? '6 4' : undefined} />)}
-                                {series.map(sr => sr.k > 0 && <g key={sr.nome + 'r'}><circle cx={x(sr.k - 1)} cy={y(sr.arr[sr.k - 1])} r="4" fill={sr.cor} stroke="#fff" strokeWidth="2" /><text x={x(sr.k - 1) + 8} y={y(sr.arr[sr.k - 1]) + 4} fontSize="11" fill="#334155" fontWeight="600">{sr.nome}</text></g>)}
+                                {(() => {
+                                  // rótulos no fim das linhas, afastados para não se sobreporem
+                                  const fins = series.filter(sr => sr.k > 0).map(sr => ({ sr, cx: x(sr.k - 1), cy: y(sr.arr[sr.k - 1]), ly: y(sr.arr[sr.k - 1]) + 4 }));
+                                  const porX = {}; fins.forEach(f => { const k = Math.round(f.cx); (porX[k] = porX[k] || []).push(f); });
+                                  Object.values(porX).forEach(g => { g.sort((a, b) => a.ly - b.ly); for (let i = 1; i < g.length; i++) if (g[i].ly - g[i - 1].ly < 13) g[i].ly = g[i - 1].ly + 13; });
+                                  return fins.map(f => <g key={f.sr.nome + 'r'}><circle cx={f.cx} cy={f.cy} r="4" fill={f.sr.cor} stroke="#fff" strokeWidth="2" /><text x={f.cx + 8} y={f.ly} fontSize="11" fill="#334155" fontWeight="600">{f.sr.nome}</text></g>);
+                                })()}
                                 {hv !== null && <line x1={x(hv)} x2={x(hv)} y1={T} y2={H - B} stroke="#94a3b8" strokeWidth="1" />}
                                 {hv !== null && series.map(sr => hv < sr.k && <circle key={sr.nome + 'h'} cx={x(hv)} cy={y(sr.arr[hv])} r="4" fill={sr.cor} stroke="#fff" strokeWidth="2" />)}
                               </svg>
