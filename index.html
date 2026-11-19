@@ -172,7 +172,7 @@
       'Almoxarife': {
         abaInicial: 'materiais',
         abas: ['materiais', 'obras', 'diario', 'compras', 'epi', 'relatorios'],
-        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'fornecedor.gerir', 'compra.criar', 'compra.editar', 'compra.receber', 'epi.entregar', 'epi.cancelar'],
+        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'fornecedor.gerir', 'compra.criar', 'compra.editar', 'compra.receber', 'cotacao.gerir', 'epi.entregar', 'epi.cancelar'],
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
@@ -185,7 +185,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -306,8 +306,12 @@
         (eng || perfil === 'Mestre de Obras') ? sb.from('etapas').select('*').order('ordem', { ascending: true }) : Promise.resolve({ data: [] }),
         eng ? sb.from('etapa_itens').select('*').order('ordem', { ascending: true }) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Mestre de Obras') ? sb.from('avanco_historico').select('*').order('dia', { ascending: true }) : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Almoxarife') ? sb.from('cotacoes').select('*').order('criado_em', { ascending: false }) : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Almoxarife') ? sb.from('cotacao_itens').select('*').order('ordem', { ascending: true }) : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Almoxarife') ? sb.from('cotacao_fornecedores').select('*') : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Almoxarife') ? sb.from('cotacao_precos').select('*') : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos] = (await Promise.all(consultas)).map(ok);
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
@@ -345,6 +349,8 @@
         etapas: etapas.map(e => ({ ...e, avanco: num(e.avanco) })),
         etapaItens: etapaItens.map(i => ({ ...i, qtd: num(i.qtd), preco_unit: num(i.preco_unit) })),
         avancoHist: avancoHist.map(h => ({ ...h, avanco: num(h.avanco) })),
+        cotacoes, cotacaoItens: cotItens.map(i => ({ ...i, qtd: num(i.qtd) })), cotacaoForns: cotForns,
+        cotacaoPrecos: cotPrecos.map(x => ({ ...x, preco_unit: num(x.preco_unit) })),
       };
     }
 
@@ -412,6 +418,8 @@
       const [fichaEpi, setFichaEpi] = useState(null);   // id do funcionário com a ficha aberta
       const [contratoSel, setContratoSel] = useState('');
       const [orcObra, setOrcObra] = useState('');
+      const [cotForm, setCotForm] = useState(null);      // montar/editar a cotação (itens e fornecedores)
+      const [mapa, setMapa] = useState(null);            // mapa de cotação aberto: { id, precos, forns, escolha }
       const [etapaModal, setEtapaModal] = useState(false);
       const [etapaForm, setEtapaForm] = useState({});
       const [colarModal, setColarModal] = useState(false);
@@ -853,6 +861,81 @@
         const { data: u, error } = await sb.storage.from('documentos').createSignedUrl(doc.arquivo, 600);
         if (error || !u?.signedUrl) { janela && janela.close(); return alert('Não foi possível abrir o arquivo.'); }
         if (janela) janela.location.href = u.signedUrl; else window.location.href = u.signedUrl;
+      };
+
+      // ---------- Cotação ----------
+      const abrirCotForm = (c) => {
+        if (!data.fornecedores.length) return alert('Cadastre os fornecedores antes (no fim da aba Compras).');
+        setCotForm(c ? { id: c.id, obraId: c.obra_id, titulo: c.titulo, obs: c.obs || '',
+            itens: data.cotacaoItens.filter(i => i.cotacao_id === c.id).map(i => ({ id: i.id, materialId: i.material_id, qtd: i.qtd })),
+            forns: data.cotacaoForns.filter(f => f.cotacao_id === c.id).map(f => f.fornecedor_id) }
+          : { obraId: primeiraObra(), titulo: '', obs: '', itens: [{ materialId: data.materiais[0]?.id || '', qtd: '' }], forns: data.fornecedores.slice(0, 3).map(f => f.id) });
+      };
+      const salvarCotForm = async (ev) => {
+        ev.preventDefault();
+        const f = cotForm;
+        const itens = f.itens.filter(i => i.materialId && Number(i.qtd) > 0);
+        if (!f.titulo.trim()) return alert('Dê um nome à cotação.');
+        if (!itens.length) return alert('Inclua pelo menos um material com quantidade.');
+        if (f.forns.length < 1) return alert('Escolha pelo menos um fornecedor.');
+        let novoId = null;
+        const okS = await executar(async () => {
+          const reg = { obra_id: f.obraId, titulo: f.titulo.trim(), obs: (f.obs || '').trim() };
+          let id = f.id;
+          if (id) ok(await sb.from('cotacoes').update(reg).eq('id', id));
+          else id = ok(await sb.from('cotacoes').insert({ ...reg, solicitante: user.nome }).select().single()).id;
+          novoId = id;
+          for (const a of data.cotacaoItens.filter(i => i.cotacao_id === id)) if (!itens.some(i => i.id === a.id)) ok(await sb.from('cotacao_itens').delete().eq('id', a.id));
+          for (const [k, i] of itens.entries()) {
+            const row = { material_id: i.materialId, qtd: Number(i.qtd), ordem: k + 1 };
+            if (i.id) ok(await sb.from('cotacao_itens').update(row).eq('id', i.id));
+            else ok(await sb.from('cotacao_itens').insert({ ...row, cotacao_id: id }));
+          }
+          const antes = data.cotacaoForns.filter(x => x.cotacao_id === id).map(x => x.fornecedor_id);
+          const idsItens = data.cotacaoItens.filter(i => i.cotacao_id === id).map(i => i.id);
+          for (const fo of antes) if (!f.forns.includes(fo)) {
+            if (idsItens.length) ok(await sb.from('cotacao_precos').delete().eq('fornecedor_id', fo).in('item_id', idsItens));
+            ok(await sb.from('cotacao_fornecedores').delete().eq('cotacao_id', id).eq('fornecedor_id', fo));
+          }
+          for (const fo of f.forns) if (!antes.includes(fo)) ok(await sb.from('cotacao_fornecedores').insert({ cotacao_id: id, fornecedor_id: fo }));
+        });
+        if (okS) { setCotForm(null); abrirMapa(novoId); }
+      };
+      const abrirMapa = (id) => setMapa({ id, carregar: true });
+      // quando os dados chegam, monta o estado editável do mapa
+      useEffect(() => {
+        if (!mapa?.carregar) return;
+        const c = data.cotacoes.find(x => x.id === mapa.id); if (!c) return;
+        const itens = data.cotacaoItens.filter(i => i.cotacao_id === c.id);
+        const precos = {}; data.cotacaoPrecos.forEach(x => { if (itens.some(i => i.id === x.item_id)) precos[x.item_id + '|' + x.fornecedor_id] = x.preco_unit.toFixed(2).replace('.', ','); });
+        const forns = {}; data.cotacaoForns.filter(x => x.cotacao_id === c.id).forEach(x => { forns[x.fornecedor_id] = { prazo: x.prazo_entrega || '', condicao: x.condicao || '' }; });
+        setMapa({ id: c.id, precos, forns, escolha: {} });
+      }, [mapa?.carregar, mapa?.id, data.cotacoes, data.cotacaoItens, data.cotacaoPrecos, data.cotacaoForns]);
+      const gravarMapa = async (m) => {
+        const itens = data.cotacaoItens.filter(i => i.cotacao_id === m.id).map(i => i.id);
+        if (itens.length) ok(await sb.from('cotacao_precos').delete().in('item_id', itens));
+        const linhas = Object.entries(m.precos).map(([k, v]) => { const [item_id, fornecedor_id] = k.split('|'); return { item_id, fornecedor_id, preco_unit: r2(numBR(v)) }; })
+          .filter(l => itens.includes(l.item_id) && l.preco_unit >= 0 && !Number.isNaN(l.preco_unit) && m.precos[l.item_id + '|' + l.fornecedor_id] !== '');
+        if (linhas.length) ok(await sb.from('cotacao_precos').insert(linhas));
+        for (const [fo, x] of Object.entries(m.forns)) ok(await sb.from('cotacao_fornecedores').update({ prazo_entrega: x.prazo || null, condicao: x.condicao || '' }).eq('cotacao_id', m.id).eq('fornecedor_id', fo));
+      };
+      const salvarMapa = () => executar(() => gravarMapa(mapa));
+      const aprovarCotacao = async (escolhaFinal, total) => {
+        if (!confirm(`Aprovar a cotação e gerar as compras (total ${formatBRL(total)})?\n\nCada item vai para o fornecedor marcado. As compras aparecem na lista como Aprovado, prontas para receber.`)) return;
+        const okS = await executar(async () => { await gravarMapa(mapa); ok(await sb.rpc('aprovar_cotacao', { p_id: mapa.id, p_escolhas: escolhaFinal })); });
+        if (okS) setMapa(null);
+      };
+      const cancelarCotacao = (c) => {
+        if (!confirm(`Cancelar a cotação "${c.titulo}"?`)) return;
+        executar(async () => ok(await sb.from('cotacoes').update({ status: 'Cancelada' }).eq('id', c.id)));
+      };
+      const excluirCotacao = (c) => {
+        if (!confirm(`Excluir a cotação "${c.titulo}"?`)) return;
+        executar(async () => { ok(await sb.from('cotacoes').delete().eq('id', c.id)); setMapa(null); });
+      };
+      const aprovarCompra = (c) => {
+        if (!confirm('Aprovar esta compra?')) return;
+        executar(async () => ok(await sb.from('compras').update({ status: 'Comprado' }).eq('id', c.id)));
       };
 
       // ---------- Orçamento e cronograma ----------
@@ -1726,6 +1809,47 @@
                     )}
                   </div>
 
+                  {can('cotacao.gerir') && (() => {
+                    const cots = data.cotacoes.filter(c => selectedObra === 'ALL' || c.obra_id === selectedObra);
+                    const melhorTotal = (c) => data.cotacaoItens.filter(i => i.cotacao_id === c.id).reduce((s, i) => {
+                      const ps = data.cotacaoPrecos.filter(x => x.item_id === i.id).map(x => x.preco_unit);
+                      return s + (ps.length ? Math.min(...ps) * i.qtd : 0);
+                    }, 0);
+                    const cor = { Aberta: 'bg-amber-100 text-amber-800', Aprovada: 'bg-emerald-100 text-emerald-800', Cancelada: 'bg-slate-200 text-slate-600' };
+                    return (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-3">
+                          <div>
+                            <h4 className="font-bold text-slate-800">Cotações</h4>
+                            <p className="text-xs text-slate-500">Preços de vários fornecedores lado a lado. O Engenheiro aprova e as compras são geradas.</p>
+                          </div>
+                          <button type="button" onClick={() => abrirCotForm(null)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Nova cotação</button>
+                        </div>
+                        {cots.length === 0 ? <p className="px-6 py-6 text-sm text-slate-400">Nenhuma cotação.</p> : (
+                          <div className="divide-y divide-slate-100">
+                            {cots.map(c => {
+                              const ni = data.cotacaoItens.filter(i => i.cotacao_id === c.id).length, nf = data.cotacaoForns.filter(f => f.cotacao_id === c.id).length;
+                              return (
+                                <div key={c.id} className="px-6 py-3 flex flex-wrap items-center justify-between gap-3 text-sm">
+                                  <div>
+                                    <p className="font-bold text-slate-800">{c.titulo} <span className={`ml-1 text-[10px] font-bold px-1.5 py-0.5 rounded ${cor[c.status]}`}>{c.status}</span></p>
+                                    <p className="text-xs text-slate-500">{getObraNome(c.obra_id)} · {ni} item(ns) · {nf} fornecedor(es) · melhor preço {formatBRL(melhorTotal(c))}{c.aprovada_por ? ` · aprovada por ${c.aprovada_por}` : ''}</p>
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <BtnAcao onClick={() => abrirMapa(c.id)}>{c.status === 'Aberta' ? 'Preencher preços' : 'Ver mapa'}</BtnAcao>
+                                    {c.status === 'Aberta' && <BtnAcao onClick={() => abrirCotForm(c)}>Itens e fornecedores</BtnAcao>}
+                                    {c.status === 'Aberta' && <BtnAcao perigo onClick={() => cancelarCotacao(c)}>Cancelar</BtnAcao>}
+                                    {c.status === 'Cancelada' && <BtnAcao perigo onClick={() => excluirCotacao(c)}>Excluir</BtnAcao>}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
                     <table className="w-full text-sm text-left">
                       <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
@@ -1753,8 +1877,8 @@
                               <td className="px-6 py-3 font-bold">{formatBRL(c.qtd * c.precoUnit)}</td>
                               <td className="px-6 py-3 text-xs whitespace-nowrap">{fmtData(c.entrega)}</td>
                               <td className="px-6 py-3">
-                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.status === 'Entregue' ? 'bg-emerald-100 text-emerald-800' : c.status === 'Cancelado' ? 'bg-slate-200 text-slate-600' : 'bg-amber-100 text-amber-800'}`}>
-                                  {c.status}
+                                <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.status === 'Entregue' ? 'bg-emerald-100 text-emerald-800' : c.status === 'Cancelado' ? 'bg-slate-200 text-slate-600' : c.status === 'Comprado' ? 'bg-sky-100 text-sky-800' : 'bg-amber-100 text-amber-800'}`}>
+                                  {c.status === 'Comprado' ? 'Aprovado' : c.status}
                                 </span>
                               </td>
                               <td className="px-6 py-3 whitespace-nowrap">
@@ -1765,6 +1889,7 @@
                                         Confirmar Entrega
                                       </button>
                                     )}
+                                    {c.status === 'Solicitado' && user.perfil === 'Engenheiro' && <BtnAcao onClick={() => aprovarCompra(c)}>Aprovar</BtnAcao>}
                                     {can('compra.editar') && <BtnAcao onClick={() => abrirCompra(c)}>Editar</BtnAcao>}
                                     {can('compra.editar') && <BtnAcao perigo onClick={() => cancelarCompra(c)}>Cancelar</BtnAcao>}
                                   </>
@@ -3048,6 +3173,158 @@
               </div>
             </div>
           )}
+
+          {cotForm && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                <h3 className="text-lg font-extrabold">{cotForm.id ? 'Itens e fornecedores da cotação' : 'Nova cotação'}</h3>
+                <form onSubmit={salvarCotForm} className="space-y-3 text-sm">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <label className="block text-xs font-bold uppercase text-slate-500">Nome
+                      <input value={cotForm.titulo} onChange={e => setCotForm({ ...cotForm, titulo: e.target.value })} placeholder="Ex.: Concreto e aço — 3º pavimento" className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" required />
+                    </label>
+                    <label className="block text-xs font-bold uppercase text-slate-500">Obra
+                      <select value={cotForm.obraId} onChange={e => setCotForm({ ...cotForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900">
+                        {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-slate-500">Materiais</p>
+                    {cotForm.itens.map((it, k) => {
+                      const set = (campo, v) => setCotForm({ ...cotForm, itens: cotForm.itens.map((x, j) => j === k ? { ...x, [campo]: v } : x) });
+                      return (
+                        <div key={k} className="grid grid-cols-12 gap-2 items-center">
+                          <select value={it.materialId} onChange={e => set('materialId', e.target.value)} className="col-span-8 border rounded-lg px-2 py-2">
+                            {data.materiais.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
+                          </select>
+                          <input type="number" min="0" step="any" value={it.qtd} onChange={e => set('qtd', e.target.value)} placeholder="Qtd" className="col-span-3 border rounded-lg px-2 py-2" />
+                          <button type="button" title="Remover" onClick={() => setCotForm({ ...cotForm, itens: cotForm.itens.filter((_, j) => j !== k) })} className="col-span-1 text-red-600 font-bold text-lg">×</button>
+                        </div>
+                      );
+                    })}
+                    <button type="button" onClick={() => setCotForm({ ...cotForm, itens: [...cotForm.itens, { materialId: data.materiais[0]?.id || '', qtd: '' }] })} className="text-xs font-bold text-amber-700 hover:underline">+ Adicionar material</button>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-slate-500">Fornecedores consultados</p>
+                    <div className="flex flex-wrap gap-2">
+                      {data.fornecedores.map(fo => { const marc = cotForm.forns.includes(fo.id); return (
+                        <button key={fo.id} type="button" onClick={() => setCotForm({ ...cotForm, forns: marc ? cotForm.forns.filter(x => x !== fo.id) : [...cotForm.forns, fo.id] })}
+                          className={`px-3 py-1.5 rounded-lg border text-xs font-bold ${marc ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-300 text-slate-600'}`}>{marc ? '✓ ' : ''}{fo.nome}</button>
+                      ); })}
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setCotForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar e preencher preços</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {mapa && mapa.precos && (() => {
+            const c = data.cotacoes.find(x => x.id === mapa.id); if (!c) return null;
+            const aberta = c.status === 'Aberta';
+            const itens = data.cotacaoItens.filter(i => i.cotacao_id === c.id);
+            const forns = data.cotacaoForns.filter(x => x.cotacao_id === c.id).map(x => data.fornecedores.find(f => f.id === x.fornecedor_id)).filter(Boolean);
+            const preco = (i, fo) => { const v = mapa.precos[i.id + '|' + fo.id]; const n = numBR(v); return v === undefined || v === '' || Number.isNaN(n) ? null : n; };
+            const menor = (i) => { let best = null; forns.forEach(fo => { const p = preco(i, fo); if (p !== null && (best === null || p < best.p)) best = { fo: fo.id, p }; }); return best; };
+            const escolha = (i) => mapa.escolha[i.id] || menor(i)?.fo;
+            const totalForn = (fo) => itens.reduce((s, i) => s + (preco(i, fo) ?? 0) * i.qtd, 0);
+            const completos = (fo) => itens.every(i => preco(i, fo) !== null);
+            const totalEscolhido = itens.reduce((s, i) => { const fo = forns.find(f => f.id === escolha(i)); return s + (fo ? (preco(i, fo) ?? 0) * i.qtd : 0); }, 0);
+            const melhorUnico = forns.filter(completos).map(fo => ({ fo, t: totalForn(fo) })).sort((a, b) => a.t - b.t)[0];
+            const faltaPreco = itens.some(i => { const fo = forns.find(f => f.id === escolha(i)); return !fo || preco(i, fo) === null; });
+            const compras = !aberta ? data.compras.filter(x => x.obraId === c.obra_id && c.aprovada_em) : [];
+            const setPreco = (i, fo, v) => setMapa({ ...mapa, precos: { ...mapa.precos, [i.id + '|' + fo.id]: v } });
+            const setForn = (fo, campo, v) => setMapa({ ...mapa, forns: { ...mapa.forns, [fo.id]: { ...mapa.forns[fo.id], [campo]: v } } });
+            const imprimir = () => { document.body.classList.add('imprimindo-ficha'); window.print(); document.body.classList.remove('imprimindo-ficha'); };
+            const td = 'px-3 py-2 border border-slate-200';
+            return (
+              <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-2xl max-w-6xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto text-sm">
+                  <div className="flex flex-wrap justify-between items-start gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Mapa de cotação</p>
+                      <h3 className="text-xl font-extrabold text-slate-900">{c.titulo}</h3>
+                      <p className="text-slate-600">{getObraNome(c.obra_id)} · {c.status}{c.aprovada_por ? ` por ${c.aprovada_por} em ${fmtData(isoLocal(new Date(c.aprovada_em)))}` : ''}</p>
+                    </div>
+                    <div className="no-print flex gap-2">
+                      <button type="button" onClick={imprimir} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
+                      <button type="button" onClick={() => setMapa(null)} className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold">Fechar</button>
+                    </div>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="bg-slate-100 text-xs uppercase font-bold text-slate-600">
+                          <th className={td}>Material</th><th className={td + ' text-right'}>Qtd</th>
+                          {forns.map(fo => <th key={fo.id} className={td + ' text-center min-w-[150px]'}>{fo.nome}</th>)}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {itens.map(i => { const m = getMat(i.material_id), mn = menor(i); return (
+                          <tr key={i.id}>
+                            <td className={td + ' font-semibold'}>{m?.nome}</td>
+                            <td className={td + ' text-right whitespace-nowrap'}>{i.qtd.toLocaleString('pt-BR')} {m?.unidade}</td>
+                            {forns.map(fo => { const p = preco(i, fo), ehMenor = mn && mn.fo === fo.id && p !== null, esc = escolha(i) === fo.id; return (
+                              <td key={fo.id} className={`${td} ${ehMenor ? 'bg-emerald-50' : ''}`}>
+                                <div className="flex items-center gap-1.5">
+                                  <input type="radio" name={'esc-' + i.id} checked={!!esc && p !== null} disabled={!aberta || p === null} onChange={() => setMapa({ ...mapa, escolha: { ...mapa.escolha, [i.id]: fo.id } })} title="Comprar deste fornecedor" className="no-print" />
+                                  {aberta ? <input inputMode="decimal" value={mapa.precos[i.id + '|' + fo.id] ?? ''} onChange={e => setPreco(i, fo, e.target.value)} placeholder="R$ unit." className="w-24 border rounded px-2 py-1 text-right" aria-label={`Preço de ${fo.nome} para ${m?.nome}`} />
+                                    : <span className="w-24 text-right">{p !== null ? formatBRL(p) : '—'}</span>}
+                                  {ehMenor && <span className="text-[10px] font-bold text-emerald-700">menor</span>}
+                                </div>
+                                {p !== null && <p className="text-[11px] text-slate-500 mt-0.5 text-right">{formatBRL(p * i.qtd)}</p>}
+                              </td>
+                            ); })}
+                          </tr>
+                        ); })}
+                        <tr className="bg-slate-50 font-bold">
+                          <td className={td} colSpan={2}>Total do fornecedor</td>
+                          {forns.map(fo => <td key={fo.id} className={`${td} text-right ${melhorUnico?.fo.id === fo.id ? 'text-emerald-700' : ''}`}>{formatBRL(totalForn(fo))}{!completos(fo) && <span className="block text-[10px] font-normal text-slate-500">faltam preços</span>}</td>)}
+                        </tr>
+                        <tr>
+                          <td className={td + ' text-xs font-bold uppercase text-slate-500'} colSpan={2}>Entrega prevista</td>
+                          {forns.map(fo => <td key={fo.id} className={td}>{aberta ? <input type="date" value={mapa.forns[fo.id]?.prazo || ''} onChange={e => setForn(fo, 'prazo', e.target.value)} className="w-full border rounded px-2 py-1 text-xs" /> : fmtData(mapa.forns[fo.id]?.prazo)}</td>)}
+                        </tr>
+                        <tr>
+                          <td className={td + ' text-xs font-bold uppercase text-slate-500'} colSpan={2}>Pagamento</td>
+                          {forns.map(fo => <td key={fo.id} className={td}>{aberta ? <input value={mapa.forns[fo.id]?.condicao || ''} onChange={e => setForn(fo, 'condicao', e.target.value)} placeholder="Ex.: 28 dias" className="w-full border rounded px-2 py-1 text-xs" /> : (mapa.forns[fo.id]?.condicao || '—')}</td>)}
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3">
+                      <p className="text-xs font-bold uppercase text-emerald-800">Comprando como marcado</p>
+                      <p className="text-xl font-extrabold text-emerald-900">{formatBRL(totalEscolhido)}</p>
+                      <p className="text-xs text-emerald-800">Cada item com o fornecedor marcado (padrão: o menor preço).</p>
+                    </div>
+                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3">
+                      <p className="text-xs font-bold uppercase text-slate-500">Tudo num fornecedor só</p>
+                      <p className="text-xl font-extrabold">{melhorUnico ? formatBRL(melhorUnico.t) : '—'}</p>
+                      <p className="text-xs text-slate-500">{melhorUnico ? `${melhorUnico.fo.nome}${melhorUnico.t > totalEscolhido ? ` · ${formatBRL(melhorUnico.t - totalEscolhido)} a mais` : ''}` : 'nenhum fornecedor cotou todos os itens'}</p>
+                    </div>
+                  </div>
+                  {aberta && (
+                    <div className="no-print flex flex-wrap justify-end gap-2">
+                      <button type="button" disabled={enviando} onClick={salvarMapa} className="disabled:opacity-50 px-4 py-2 border border-slate-300 rounded-lg font-bold">Salvar preços</button>
+                      {user.perfil === 'Engenheiro'
+                        ? <button type="button" disabled={enviando || faltaPreco} onClick={() => aprovarCotacao(Object.fromEntries(itens.map(i => [i.id, escolha(i)])), totalEscolhido)} className="disabled:opacity-50 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold">Aprovar e gerar compras</button>
+                        : <span className="text-xs text-slate-500 self-center">Salve os preços; a aprovação é do Engenheiro.</span>}
+                    </div>
+                  )}
+                  {!aberta && c.status === 'Aprovada' && <p className="text-xs text-slate-500">As compras geradas estão na lista de compras como <b>Aprovado</b>.</p>}
+                  <div className="hidden print:grid grid-cols-2 gap-10 pt-10 text-xs text-center text-slate-600">
+                    <div className="border-t border-slate-400 pt-1">Cotado por</div>
+                    <div className="border-t border-slate-400 pt-1">Aprovado por</div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {etapaModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
