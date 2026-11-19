@@ -97,6 +97,8 @@
     const isoLocal = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
     const hojeISO = () => isoLocal(new Date());
     const somaDias = (dias) => { const d = new Date(); d.setDate(d.getDate() + dias); return isoLocal(d); };
+    const segundaDe = (iso) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return isoLocal(d); };
+    const CAUSAS_PPC = ['Material', 'Mão de obra', 'Equipamento', 'Projeto ou definição', 'Clima', 'Serviço anterior', 'Mudança de prioridade', 'Meta irreal', 'Outros'];
     const somaDiasDe = (iso, dias) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + dias); return isoLocal(d); };
     const fmtData = (iso) => (iso && /^\d{4}-\d{2}-\d{2}/.test(iso)) ? iso.slice(8, 10) + '/' + iso.slice(5, 7) + '/' + iso.slice(0, 4) + iso.slice(10) : (iso || '-');
     const CATEGORIAS_PADRAO = ['Cimentos e argamassas', 'Agregados', 'Alvenaria', 'Aço e ferragens', 'Hidráulica', 'Elétrica', 'Acabamentos', 'Madeiras', 'Ferramentas e EPI', 'Geral'];
@@ -217,7 +219,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'planejamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -227,8 +229,8 @@
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
-        abas: ['materiais', 'obras', 'orcamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'funcionarios', 'epi', 'documentos'],
-        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar', 'orcamento.avanco', 'producao.lancar'],
+        abas: ['materiais', 'obras', 'orcamento', 'planejamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'funcionarios', 'epi', 'documentos'],
+        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar', 'orcamento.avanco', 'producao.lancar', 'planejamento.gerir'],
       },
       'Cliente': {
         abaInicial: 'portal',
@@ -241,7 +243,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null, notas: [], notaItens: [], nfeMapas: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null, notas: [], notaItens: [], nfeMapas: [], tarefas: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -383,8 +385,9 @@
         eng ? sb.from('envios_alertas').select('*').order('dia', { ascending: false }).limit(1) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Almoxarife') ? sb.from('notas_fiscais').select('*').order('criado_em', { ascending: false }).limit(300) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Almoxarife') ? sb.from('nfe_mapeamentos').select('*') : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Mestre de Obras') ? sb.from('tarefas_semana').select('*').order('semana', { ascending: false }).order('ordem', { ascending: true }).limit(5000) : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs, alertasDia, envios, notas, nfeMapas] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs, alertasDia, envios, notas, nfeMapas, tarefas] = (await Promise.all(consultas)).map(ok);
       const inspItens = inspecoes.length ? ok(await sb.from('inspecao_itens').select('*').in('inspecao_id', inspecoes.map(i => i.id)).order('ordem', { ascending: true })) : [];
       const notaItens = notas.length ? ok(await sb.from('nota_itens').select('*').in('nota_id', notas.map(n => n.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
@@ -440,6 +443,7 @@
         notas: notas.map(n => ({ ...n, valor_total: num(n.valor_total), frete: num(n.frete), desconto: num(n.desconto) })),
         notaItens: notaItens.map(i => ({ ...i, qtd_nf: num(i.qtd_nf), valor_unit: num(i.valor_unit), valor_total: num(i.valor_total), fator: num(i.fator), qtd_estoque: i.qtd_estoque === null ? null : num(i.qtd_estoque) })),
         nfeMapas,
+        tarefas: tarefas.map(t => ({ ...t, quantidade: t.quantidade === null ? null : num(t.quantidade) })),
       };
     }
 
@@ -508,7 +512,10 @@
       const [contratoSel, setContratoSel] = useState('');
       const [orcObra, setOrcObra] = useState('');
       const [cotForm, setCotForm] = useState(null);
-      const [nfForm, setNfForm] = useState(null);       // importação do XML da NF-e
+      const [nfForm, setNfForm] = useState(null);
+      const [planSemana, setPlanSemana] = useState(() => segundaDe(hojeISO()));
+      const [tarefaForm, setTarefaForm] = useState(null);
+      const [causaForm, setCausaForm] = useState(null);       // importação do XML da NF-e
       const [notaAberta, setNotaAberta] = useState(null);
       const [receitaForm, setReceitaForm] = useState(null);
       const [inspForm, setInspForm] = useState(null);
@@ -1161,6 +1168,45 @@
             forns: data.cotacaoForns.filter(f => f.cotacao_id === c.id).map(f => f.fornecedor_id) }
           : { obraId: primeiraObra(), titulo: '', obs: '', itens: [{ materialId: data.materiais[0]?.id || '', qtd: '' }], forns: data.fornecedores.slice(0, 3).map(f => f.id) });
       };
+      // ---------- Planejamento semanal ----------
+      const abrirTarefa = (t, obraId) => setTarefaForm(t
+        ? { id: t.id, obraId: t.obra_id, descricao: t.descricao, responsavel: t.responsavel, etapaId: t.etapa_id || '', quantidade: t.quantidade === null ? '' : String(t.quantidade).replace('.', ','), unidade: t.unidade }
+        : { obraId, descricao: '', responsavel: '', etapaId: '', quantidade: '', unidade: '' });
+      const salvarTarefa = async (ev) => {
+        ev.preventDefault();
+        const f = tarefaForm, q = f.quantidade === '' ? null : numBR(f.quantidade);
+        if (!f.descricao.trim()) { alert('Descreva a tarefa.'); return; }
+        if (q !== null && !(q >= 0)) { alert('Quantidade inválida.'); return; }
+        const reg = { descricao: f.descricao.trim(), responsavel: f.responsavel.trim(), etapa_id: f.etapaId || null, quantidade: q, unidade: f.unidade.trim() };
+        const ordem = 1 + Math.max(0, ...data.tarefas.filter(t => t.obra_id === f.obraId && t.semana === planSemana).map(t => t.ordem));
+        if (await executar(async () => ok(f.id
+          ? await sb.from('tarefas_semana').update(reg).eq('id', f.id)
+          : await sb.from('tarefas_semana').insert({ ...reg, obra_id: f.obraId, semana: planSemana, ordem, criado_por: user.nome })))) setTarefaForm(null);
+      };
+      const marcarTarefa = (t, status) => {
+        if (status === 'Não concluída') { setCausaForm({ id: t.id, descricao: t.descricao, causa: t.causa || '', obs: t.obs || '' }); return; }
+        executar(async () => ok(await sb.from('tarefas_semana').update({ status, causa: null, obs: status === 'Planejada' ? t.obs : '', fechada_em: status === 'Planejada' ? null : new Date().toISOString() }).eq('id', t.id)));
+      };
+      const salvarCausa = async (ev) => {
+        ev.preventDefault();
+        if (!causaForm.causa) { alert('Escolha a causa.'); return; }
+        if (await executar(async () => ok(await sb.from('tarefas_semana').update({ status: 'Não concluída', causa: causaForm.causa, obs: causaForm.obs.trim(), fechada_em: new Date().toISOString() }).eq('id', causaForm.id)))) setCausaForm(null);
+      };
+      const excluirTarefa = (t) => {
+        if (!confirm(`Excluir a tarefa "${t.descricao}"?`)) return;
+        executar(async () => ok(await sb.from('tarefas_semana').delete().eq('id', t.id)));
+      };
+      const trazerPendentes = (obraId) => {
+        const ant = somaDiasDe(planSemana, -7);
+        const jaTem = new Set(data.tarefas.filter(t => t.obra_id === obraId && t.semana === planSemana).map(t => t.origem_id).filter(Boolean));
+        const pend = data.tarefas.filter(t => t.obra_id === obraId && t.semana === ant && t.status !== 'Concluída' && !jaTem.has(t.id));
+        if (!pend.length) { alert('Não há tarefas pendentes da semana anterior para trazer.'); return; }
+        let ordem = Math.max(0, ...data.tarefas.filter(t => t.obra_id === obraId && t.semana === planSemana).map(t => t.ordem));
+        executar(async () => ok(await sb.from('tarefas_semana').insert(pend.map(t => ({
+          obra_id: obraId, semana: planSemana, ordem: ++ordem, descricao: t.descricao, responsavel: t.responsavel, etapa_id: t.etapa_id,
+          quantidade: t.quantidade, unidade: t.unidade, origem_id: t.id, criado_por: user.nome })))));
+      };
+
       // ---------- Nota fiscal: importação do XML da NF-e ----------
       const sugerirCompraNF = (materialId, obraId, fornId, qtd, usadas) => {
         if (!materialId) return '';
@@ -1321,6 +1367,7 @@
       };
 
       // ---------- Orçamento e cronograma ----------
+      const tarefasSemBaixa = data.tarefas.filter(t => (selectedObra === 'ALL' || t.obra_id === selectedObra) && t.status === 'Planejada' && t.semana < segundaDe(hojeISO())).length;
       const etapasAtrasadas = data.etapas.filter(e => (selectedObra === 'ALL' || e.obra_id === selectedObra) && situacaoEtapa(e, hojeISO()) === 'Atrasada').length;
       const valorEtapa = (id) => data.etapaItens.filter(i => i.etapa_id === id).reduce((s, i) => s + r2(i.qtd * i.preco_unit), 0);
       const abrirEtapa = (e, obraId) => {
@@ -1712,6 +1759,7 @@
         { id: 'materiais', label: 'Controle de Materiais', icon: 'package', badge: alertasEstoque.length || null },
         { id: 'obras', label: 'Cadastro de Obras', icon: 'building' },
         { id: 'orcamento', label: 'Orçamento e Cronograma', icon: 'calendar', badge: etapasAtrasadas || null },
+        { id: 'planejamento', label: 'Planejamento Semanal', icon: 'check', badge: tarefasSemBaixa || null },
         { id: 'consumo', label: 'Consumo e Perdas', icon: 'gauge', badge: consumoAlertas || null },
         { id: 'produtividade', label: 'Produtividade', icon: 'bolt' },
         { id: 'diario', label: 'Diário de Obra', icon: 'book' },
@@ -2845,6 +2893,141 @@
                         </div>
                       </div>
                     </>)}
+                  </div>
+                );
+              })()}
+
+              {aba === 'planejamento' && (() => {
+                const obraId = consObraId, hojeS = segundaDe(hojeISO());
+                const gerir = can('planejamento.gerir');
+                const daSemana = (w) => data.tarefas.filter(t => t.obra_id === obraId && t.semana === w).sort((a, b) => a.ordem - b.ordem);
+                const tarefas = daSemana(planSemana);
+                const fechada = (w) => w < hojeS;
+                const ppcDe = (ts) => ts.length ? ts.filter(t => t.status === 'Concluída').length / ts.length * 100 : null;
+                const feitas = tarefas.filter(t => t.status === 'Concluída').length, nao = tarefas.filter(t => t.status === 'Não concluída').length;
+                const abertas = tarefas.length - feitas - nao;
+                const ppc = ppcDe(tarefas);
+                const hist = Array.from({ length: 12 }, (_, i) => somaDiasDe(hojeS, -7 * (12 - i))).map(w => ({ w, n: daSemana(w).length, ppc: ppcDe(daSemana(w)) }));
+                const comDados = hist.filter(h => h.n);
+                const media4 = comDados.slice(-4); const ppc4 = media4.length ? media4.reduce((s, h) => s + h.ppc, 0) / media4.length : null;
+                const ini12 = hist[0].w;
+                const naoFeitas = data.tarefas.filter(t => t.obra_id === obraId && t.semana >= ini12 && t.semana < hojeS && t.status !== 'Concluída');
+                const causas = CAUSAS_PPC.map(c => ({ c, n: naoFeitas.filter(t => (t.causa || (t.status === 'Planejada' ? 'Sem baixa' : '')) === c).length })).filter(x => x.n);
+                const semBaixa = naoFeitas.filter(t => t.status === 'Planejada').length;
+                if (semBaixa) causas.push({ c: 'Sem baixa', n: semBaixa });
+                causas.sort((a, b) => b.n - a.n);
+                const totCausas = causas.reduce((s, x) => s + x.n, 0);
+                const etapaNome = (id) => data.etapas.find(e => e.id === id)?.nome;
+                const fq = (v) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+                const fimSem = somaDiasDe(planSemana, 5);
+                const anterior = daSemana(somaDiasDe(planSemana, -7));
+                const pendAnt = anterior.filter(t => t.status !== 'Concluída' && !tarefas.some(x => x.origem_id === t.id)).length;
+                const corPpc = (v) => v === null ? 'text-slate-400' : v >= 80 ? 'text-emerald-700' : v >= 60 ? 'text-amber-700' : 'text-red-700';
+                // gráfico PPC
+                const W = 640, H = 200, L = 34, R = 10, T = 14, B = 30, bw = (W - L - R) / hist.length;
+                const y = (v) => T + (H - T - B) * (1 - v / 100);
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Planejamento semanal</h3>
+                        <p className="text-xs text-slate-500">Combine as tarefas da semana com a equipe e dê baixa no fim dela. O <b>PPC</b> é o percentual do planejado que foi cumprido; as causas mostram o que mais trava a obra.</p>
+                      </div>
+                      {selectedObra === 'ALL' && <select value={consObraId} onChange={e => setConsObra(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold">{data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}</select>}
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="bg-white border border-slate-200 rounded-xl p-4">
+                        <p className="text-xs text-slate-500 font-bold uppercase">{fechada(planSemana) ? 'PPC da semana' : 'PPC até agora (semana em curso)'}</p>
+                        <p className={`text-3xl font-extrabold ${fechada(planSemana) ? corPpc(ppc) : 'text-slate-800'}`}>{ppc === null ? '—' : ppc.toFixed(0) + '%'}</p>
+                        <p className="text-xs text-slate-500">{feitas} de {tarefas.length} concluídas{abertas ? ` · ${abertas} em aberto` : ''}</p>
+                      </div>
+                      <div className="bg-white border border-slate-200 rounded-xl p-4">
+                        <p className="text-xs text-slate-500 font-bold uppercase">Média das últimas 4 semanas</p>
+                        <p className={`text-3xl font-extrabold ${corPpc(ppc4)}`}>{ppc4 === null ? '—' : ppc4.toFixed(0) + '%'}</p>
+                        <p className="text-xs text-slate-500">meta: 80% ou mais</p>
+                      </div>
+                      <div className={`border rounded-xl p-4 ${causas[0] ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                        <p className="text-xs text-slate-500 font-bold uppercase">O que mais atrapalhou (12 semanas)</p>
+                        <p className="text-2xl font-extrabold text-slate-900">{causas[0] ? causas[0].c : '—'}</p>
+                        <p className="text-xs text-slate-500">{causas[0] ? `${causas[0].n} de ${totCausas} tarefas não cumpridas` : 'nenhuma tarefa deixou de ser cumprida'}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+                      <div className="px-4 sm:px-6 py-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-3">
+                        <div className="flex items-center gap-2">
+                          <button type="button" aria-label="Semana anterior" onClick={() => setPlanSemana(somaDiasDe(planSemana, -7))} className="p-2 rounded-lg border border-slate-300 hover:bg-slate-100"><Icon name="chevronLeft" className="w-4 h-4" /></button>
+                          <div className="text-center min-w-[11rem]">
+                            <p className="font-bold text-slate-800">{fmtData(planSemana).slice(0, 5)} a {fmtData(fimSem).slice(0, 5)}</p>
+                            <p className="text-[11px] text-slate-500">{planSemana === hojeS ? 'esta semana' : planSemana === somaDiasDe(hojeS, 7) ? 'próxima semana' : planSemana < hojeS ? 'semana encerrada' : 'semana futura'}</p>
+                          </div>
+                          <button type="button" aria-label="Próxima semana" onClick={() => setPlanSemana(somaDiasDe(planSemana, 7))} className="p-2 rounded-lg border border-slate-300 hover:bg-slate-100"><Icon name="chevronRight" className="w-4 h-4" /></button>
+                          {planSemana !== hojeS && <button type="button" onClick={() => setPlanSemana(hojeS)} className="text-xs font-bold text-amber-700 hover:underline ml-1">hoje</button>}
+                        </div>
+                        {gerir && (
+                          <div className="flex flex-wrap gap-2">
+                            {pendAnt > 0 && <button type="button" onClick={() => trazerPendentes(obraId)} className="border border-slate-300 hover:bg-slate-100 px-3 py-2 rounded-xl font-bold text-sm">Trazer {pendAnt} pendente{pendAnt > 1 ? 's' : ''} da semana anterior</button>}
+                            <button type="button" onClick={() => abrirTarefa(null, obraId)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Tarefa</button>
+                          </div>
+                        )}
+                      </div>
+                      {fechada(planSemana) && abertas > 0 && <p className="mx-4 sm:mx-6 mt-3 text-sm bg-amber-50 border border-amber-200 text-amber-900 rounded-lg px-3 py-2">Esta semana já acabou e {abertas} tarefa{abertas > 1 ? 's estão' : ' está'} sem baixa. Marque se foi feita ou não, com a causa.</p>}
+                      {tarefas.length === 0 ? (
+                        <p className="px-6 py-8 text-sm text-slate-500">Nenhuma tarefa planejada para esta semana.{gerir ? ' Toque em "+ Tarefa" e combine com a equipe o que será feito — só o que estiver liberado (material, projeto e serviço anterior prontos).' : ''}</p>
+                      ) : (
+                        <div className="divide-y divide-slate-100">
+                          {tarefas.map(t => {
+                            const st = t.status;
+                            return (
+                              <div key={t.id} className="px-4 sm:px-6 py-3 flex flex-wrap items-start gap-3">
+                                <div className="flex gap-1.5 shrink-0 pt-0.5">
+                                  <button type="button" disabled={!gerir} title="Concluída" onClick={() => marcarTarefa(t, st === 'Concluída' ? 'Planejada' : 'Concluída')}
+                                    className={`w-9 h-9 rounded-lg border-2 font-extrabold text-lg leading-none ${st === 'Concluída' ? 'bg-emerald-600 border-emerald-600 text-white' : 'border-slate-300 text-slate-300 hover:border-emerald-500 hover:text-emerald-600'}`}>✓</button>
+                                  <button type="button" disabled={!gerir} title="Não concluída" onClick={() => st === 'Não concluída' ? marcarTarefa(t, 'Planejada') : marcarTarefa(t, 'Não concluída')}
+                                    className={`w-9 h-9 rounded-lg border-2 font-extrabold text-lg leading-none ${st === 'Não concluída' ? 'bg-red-600 border-red-600 text-white' : 'border-slate-300 text-slate-300 hover:border-red-500 hover:text-red-600'}`}>✗</button>
+                                </div>
+                                <div className="flex-1 min-w-[12rem]">
+                                  <p className={`font-semibold ${st === 'Concluída' ? 'text-slate-500' : 'text-slate-900'}`}>{t.descricao}{t.quantidade !== null && <span className="font-normal text-slate-600"> · {fq(t.quantidade)} {t.unidade}</span>}</p>
+                                  <p className="text-xs text-slate-500">{t.responsavel || 'sem responsável'}{t.etapa_id ? ` · ${etapaNome(t.etapa_id)}` : ''}{t.origem_id ? ' · repetida da semana anterior' : ''}</p>
+                                  {st === 'Não concluída' && <p className="text-xs mt-1"><span className="px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-bold">{t.causa}</span>{t.obs && <span className="text-slate-600"> {t.obs}</span>}</p>}
+                                </div>
+                                {gerir && st === 'Planejada' && (
+                                  <div className="shrink-0"><BtnAcao onClick={() => abrirTarefa(t)}>Editar</BtnAcao><BtnAcao perigo onClick={() => excluirTarefa(t)}>Excluir</BtnAcao></div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+                      <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                        <h4 className="font-bold text-slate-800">PPC das últimas 12 semanas</h4>
+                        <p className="text-xs text-slate-500 mb-2">Percentual do planejado que foi cumprido em cada semana. Abaixo de 80%, o plano está prometendo mais do que a obra entrega.</p>
+                        {comDados.length === 0 ? <p className="text-sm text-slate-400 py-6">Sem semanas encerradas com tarefas.</p> : (
+                          <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-auto" role="img" aria-label="PPC por semana">
+                            {[0, 50, 100].map(v => <g key={v}><line x1={L} x2={W - R} y1={y(v)} y2={y(v)} stroke="#e2e8f0" /><text x={L - 6} y={y(v) + 4} textAnchor="end" fontSize="10" fill="#64748b">{v}%</text></g>)}
+                            {hist.map((h, i) => { const x = L + i * bw; return (
+                              <g key={h.w}>
+                                <title>{`Semana de ${fmtData(h.w).slice(0, 5)}: ${h.ppc === null ? 'sem tarefas' : h.ppc.toFixed(0) + '%'}`}</title>
+                                {h.ppc !== null && <rect x={x + bw * 0.18} y={y(h.ppc)} width={bw * 0.64} height={Math.max(0, y(0) - y(h.ppc))} rx="3" fill="#2563eb" />}
+                                {h.ppc !== null && <text x={x + bw / 2} y={y(h.ppc) - 4} textAnchor="middle" fontSize="10" fontWeight="700" fill="#334155">{h.ppc.toFixed(0)}</text>}
+                                <text x={x + bw / 2} y={H - 12} textAnchor="middle" fontSize="9" fill="#64748b">{fmtData(h.w).slice(0, 5)}</text>
+                              </g>
+                            ); })}
+                            <line x1={L} x2={W - R} y1={y(80)} y2={y(80)} stroke="#059669" strokeWidth="1.5" strokeDasharray="5 4" />
+                            <text x={W - R} y={y(80) - 4} textAnchor="end" fontSize="10" fontWeight="700" fill="#059669">meta 80%</text>
+                          </svg>
+                        )}
+                      </div>
+                      <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-5">
+                        <h4 className="font-bold text-slate-800">Por que não foi feito</h4>
+                        <p className="text-xs text-slate-500 mb-3">Causas das tarefas não cumpridas nas últimas 12 semanas. Ataque a primeira da lista.</p>
+                        <BarrasH itens={causas.map(x => ({ rotulo: x.c, valor: x.n, cor: x.c === 'Sem baixa' ? 'bg-slate-400' : 'bg-amber-500' }))} formato={(v) => `${v} (${(v / totCausas * 100).toFixed(0)}%)`} vazio="Nenhuma tarefa deixou de ser cumprida." />
+                      </div>
+                    </div>
                   </div>
                 );
               })()}
@@ -4214,6 +4397,62 @@
                   ); })}
                 </ul>
               </div>
+            </div>
+          )}
+
+          {tarefaForm && (() => {
+            const etapasObra = data.etapas.filter(e => e.obra_id === tarefaForm.obraId).sort((a, b) => a.ordem - b.ordem);
+            const inp = 'w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900', lbl = 'block text-xs font-bold uppercase text-slate-500';
+            const set = (c, v) => setTarefaForm({ ...tarefaForm, [c]: v });
+            return (
+              <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                <form onSubmit={salvarTarefa} className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-3 text-sm">
+                  <h3 className="text-lg font-extrabold">{tarefaForm.id ? 'Editar tarefa' : `Nova tarefa — semana de ${fmtData(planSemana).slice(0, 5)}`}</h3>
+                  <label className={lbl}>O que será feito
+                    <input autoFocus value={tarefaForm.descricao} onChange={e => set('descricao', e.target.value)} placeholder="Ex.: Concretar laje do 1º pavimento" className={inp} required />
+                  </label>
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className={`${lbl} col-span-1`}>Quantidade<input value={tarefaForm.quantidade} inputMode="decimal" onChange={e => set('quantidade', e.target.value)} placeholder="opcional" className={inp} /></label>
+                    <label className={`${lbl} col-span-1`}>Unidade<input value={tarefaForm.unidade} onChange={e => set('unidade', e.target.value)} placeholder="m², m³, kg" className={inp} /></label>
+                    <label className={`${lbl} col-span-1`}>Etapa
+                      <select value={tarefaForm.etapaId} onChange={e => set('etapaId', e.target.value)} className={inp}>
+                        <option value="">—</option>{etapasObra.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
+                      </select>
+                    </label>
+                  </div>
+                  <label className={lbl}>Responsável / equipe
+                    <input value={tarefaForm.responsavel} onChange={e => set('responsavel', e.target.value)} list="lista-equipes" placeholder="Ex.: José e Luiz, empreiteiro de fundação" className={inp} />
+                    <datalist id="lista-equipes">{[...new Set([...data.funcionarios.filter(f => f.obraId === tarefaForm.obraId).map(f => f.nome), ...data.tarefas.map(t => t.responsavel).filter(Boolean)])].slice(0, 60).map(n => <option key={n} value={n} />)}</datalist>
+                  </label>
+                  <p className="text-xs text-slate-500">Planeje só o que está liberado: material na obra, projeto definido e serviço anterior pronto.</p>
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" onClick={() => setTarefaForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                  </div>
+                </form>
+              </div>
+            );
+          })()}
+
+          {causaForm && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <form onSubmit={salvarCausa} className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-3 text-sm">
+                <h3 className="text-lg font-extrabold">Por que não foi feito?</h3>
+                <p className="text-slate-600">{causaForm.descricao}</p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {CAUSAS_PPC.map(c => (
+                    <button key={c} type="button" onClick={() => setCausaForm({ ...causaForm, causa: c })}
+                      className={`px-3 py-2 rounded-lg border text-xs font-bold ${causaForm.causa === c ? 'bg-red-600 border-red-600 text-white' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}>{c}</button>
+                  ))}
+                </div>
+                <label className="block text-xs font-bold uppercase text-slate-500">Detalhe (opcional)
+                  <input value={causaForm.obs} onChange={e => setCausaForm({ ...causaForm, obs: e.target.value })} placeholder="Ex.: aço chegou com 2 dias de atraso" className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
+                </label>
+                <div className="flex justify-end gap-2 pt-1">
+                  <button type="button" onClick={() => setCausaForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                  <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-red-600 text-white rounded-lg font-bold">Marcar como não feita</button>
+                </div>
+              </form>
             </div>
           )}
 
