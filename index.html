@@ -61,6 +61,7 @@
         wallet: <><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>,
         book: <><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8"/><path d="M8 11h6"/></>,
         camera: <><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>,
+        eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></>,
         check: <><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></>,
         trending: <><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>,
         calendar: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M7 14h4M7 18h8"/></>,
@@ -168,7 +169,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -181,13 +182,18 @@
         abas: ['materiais', 'obras', 'orcamento', 'diario', 'qualidade', 'compras', 'funcionarios', 'epi', 'documentos'],
         acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar', 'orcamento.avanco'],
       },
+      'Cliente': {
+        abaInicial: 'portal',
+        abas: ['portal'],
+        acoes: [],
+      },
     };
 
     // ---------- Conexão com o Supabase ----------
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -278,6 +284,7 @@
     };
 
     async function carregarDados(perfil, mesPresenca, mesFolha, diaDiario) {
+      if (perfil === 'Cliente') return { ...DADOS_VAZIOS, portal: ok(await sb.rpc('portal_cliente', {})) || [] };
       const eng = perfil === 'Engenheiro';
       const iniF = mesFolha + '-01', fimF = mesFolha + '-' + pad2(diasDoMes(mesFolha));
       const iniMes = mesPresenca + '-01';
@@ -317,8 +324,10 @@
         sb.from('checklist_modelos').select('*').order('tipo', { ascending: false }).order('nome', { ascending: true }),
         sb.from('inspecoes').select('*').order('dia', { ascending: false }).order('criado_em', { ascending: false }).limit(500),
         sb.from('pendencias').select('*').order('criado_em', { ascending: false }).limit(1000),
+        eng ? sb.rpc('portal_cliente', {}) : Promise.resolve({ data: [] }),
+        eng ? sb.from('cliente_obras').select('*') : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras] = (await Promise.all(consultas)).map(ok);
       const inspItens = inspecoes.length ? ok(await sb.from('inspecao_itens').select('*').in('inspecao_id', inspecoes.map(i => i.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
@@ -364,6 +373,7 @@
         modelos: modelos.map(m => ({ ...m, itens: Array.isArray(m.itens) ? m.itens : JSON.parse(m.itens || '[]') })),
         inspecoes: inspecoes.map(i => ({ ...i, itens: inspItens.filter(x => x.inspecao_id === i.id) })),
         pendencias,
+        portal: portal || [], clienteObras,
       };
     }
 
@@ -438,6 +448,9 @@
       const [pendForm, setPendForm] = useState(null);
       const [modeloForm, setModeloForm] = useState(null);
       const [filtroPend, setFiltroPend] = useState('abertas');
+      const [portalObra, setPortalObra] = useState('');
+      const [portalFotos, setPortalFotos] = useState({});
+      const [fotoGrande, setFotoGrande] = useState(null);
       const [saldoForm, setSaldoForm] = useState(null);
       const [caixaHover, setCaixaHover] = useState(null);      // montar/editar a cotação (itens e fornecedores)
       const [mapa, setMapa] = useState(null);            // mapa de cotação aberto: { id, precos, forns, escolha }
@@ -884,6 +897,20 @@
         if (error || !u?.signedUrl) { janela && janela.close(); return alert('Não foi possível abrir o arquivo.'); }
         if (janela) janela.location.href = u.signedUrl; else window.location.href = u.signedUrl;
       };
+
+      // ---------- Portal do cliente ----------
+      const alternarObraCliente = (p, obraId, marcar) => executar(async () => ok(marcar
+        ? await sb.from('cliente_obras').insert({ perfil_id: p.id, obra_id: obraId })
+        : await sb.from('cliente_obras').delete().eq('perfil_id', p.id).eq('obra_id', obraId)));
+      const portalAtual = data.portal.find(x => x.id === portalObra) || data.portal.find(x => selectedObra !== 'ALL' && x.id === selectedObra) || data.portal[0];
+      // URLs temporárias das fotos do portal
+      useEffect(() => {
+        const faltam = (portalAtual?.diarios || []).flatMap(d => d.fotos.map(f => f.caminho)).filter(c => !portalFotos[c]);
+        if (!faltam.length || !sb?.storage) return;
+        sb.storage.from('diario').createSignedUrls(faltam, 3600).then(({ data: urls }) => {
+          if (urls) setPortalFotos(prev => { const n = { ...prev }; urls.forEach(u => { if (u.signedUrl) n[u.path] = u.signedUrl; }); return n; });
+        });
+      }, [portalAtual?.id, data.portal]);
 
       // ---------- Qualidade e pendências ----------
       const pendAtrasadas = data.pendencias.filter(p => p.status !== 'Resolvida' && p.prazo && p.prazo < hojeISO() && (selectedObra === 'ALL' || p.obra_id === selectedObra)).length;
@@ -1460,6 +1487,7 @@
         { id: 'documentos', label: 'Documentos', icon: 'file', badge: docsAlerta.length || null },
         { id: 'folha', label: 'Folha de Pagamento', icon: 'wallet' },
         { id: 'relatorios', label: 'Relatórios', icon: 'file' },
+        { id: 'portal', label: user?.perfil === 'Cliente' ? 'Minha obra' : 'Portal do Cliente', icon: 'eye' },
         { id: 'usuarios', label: 'Usuários', icon: 'users', badge: data.perfis.filter(p => !p.ativo).length || null },
       ].filter(item => podeVerAba(item.id));
 
@@ -1561,10 +1589,10 @@
                 <h2 className="text-lg font-extrabold text-slate-900">
                   {menuItems.find(m => m.id === aba)?.label}
                 </h2>
-                <p className="text-xs text-slate-500">Controle de materiais, compras, custos e equipes por canteiro</p>
+                <p className="text-xs text-slate-500">{user.perfil === 'Cliente' ? 'Acompanhe o andamento da sua obra' : 'Controle de materiais, compras, custos e equipes por canteiro'}</p>
               </div>
 
-              <div className="flex items-center gap-3">
+              {user.perfil !== 'Cliente' && <div className="flex items-center gap-3">
                 <label className="text-xs font-bold uppercase text-slate-500">Obra Ativa:</label>
                 <select
                   value={selectedObra}
@@ -1576,7 +1604,7 @@
                     <option key={o.id} value={o.id}>{o.nome}</option>
                   ))}
                 </select>
-              </div>
+              </div>}
             </header>
 
             <div className="p-6 space-y-6 max-w-7xl w-full mx-auto">
@@ -3230,11 +3258,116 @@
                 );
               })()}
 
+              {aba === 'portal' && (() => {
+                const P = portalAtual;
+                const cliente = user.perfil === 'Cliente';
+                if (!P) return <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-500 text-sm">{cliente ? 'Sua conta ainda não está ligada a nenhuma obra. Fale com o engenheiro responsável.' : 'Nenhuma obra cadastrada.'}</div>;
+                const pagos = P.pagamentos.filter(x => x.status === 'Recebido'), aPagar = P.pagamentos.filter(x => x.status !== 'Recebido');
+                const totPago = pagos.reduce((s, x) => s + Number(x.valor), 0), totAPagar = aPagar.reduce((s, x) => s + Number(x.valor), 0);
+                const prox = aPagar[0];
+                const fotos = P.diarios.flatMap(d => d.fotos.map(f => ({ ...f, dia: d.dia })));
+                const atrasoPts = Number(P.previsto) - Number(P.avanco);
+                const hoje = hojeISO();
+                return (
+                  <div className="space-y-6 max-w-5xl">
+                    {!cliente && <div className="bg-sky-50 border border-sky-200 text-sky-900 rounded-xl p-3 text-sm no-print">Esta é a tela que o <b>cliente</b> vê. Para dar acesso, em <b>Usuários</b> escolha o perfil Cliente e marque a obra dele. Valores internos (custos, orçamento, estoque, equipe) não aparecem para ele.</div>}
+                    {data.portal.length > 1 && (
+                      <select value={P.id} onChange={e => setPortalObra(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold">
+                        {data.portal.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+                      </select>
+                    )}
+                    <div className="bg-slate-900 text-white rounded-2xl p-6 space-y-4">
+                      <div className="flex flex-wrap justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-wider text-amber-400">Acompanhamento da obra</p>
+                          <h3 className="text-2xl font-extrabold mt-1">{P.nome}</h3>
+                          <p className="text-sm text-slate-300">{P.endereco}</p>
+                          <p className="text-xs text-slate-400 mt-1">Responsável técnico: {P.responsavel} · início {fmtData(P.inicio)} · entrega prevista {fmtData(P.previsao)}</p>
+                        </div>
+                        <span className="self-start text-xs font-bold bg-white/10 px-3 py-1.5 rounded-lg">{P.status}</span>
+                      </div>
+                      <div>
+                        <div className="flex justify-between items-end mb-2">
+                          <p className="text-4xl font-extrabold">{Number(P.avanco).toFixed(0)}%<span className="text-sm font-semibold text-slate-300 ml-2">concluído</span></p>
+                          <p className="text-xs text-slate-300 text-right">Previsto para hoje: {Number(P.previsto).toFixed(0)}%<br />{atrasoPts > 5 ? <span className="text-amber-300 font-bold">um pouco atrás do cronograma</span> : <span className="text-emerald-300 font-bold">dentro do cronograma</span>}</p>
+                        </div>
+                        <div className="h-3 bg-white/10 rounded-full overflow-hidden relative">
+                          <div className="h-full bg-amber-400" style={{ width: Math.min(100, P.avanco) + '%' }} />
+                          <span className="absolute top-0 bottom-0 border-l-2 border-white/70" style={{ left: Math.min(100, P.previsto) + '%' }} title="Previsto para hoje" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-white/5 rounded-xl p-3"><p className="text-2xl font-extrabold">{P.equipe_hoje}</p><p className="text-[11px] text-slate-300">pessoas na obra hoje</p></div>
+                        <div className="bg-white/5 rounded-xl p-3"><p className="text-2xl font-extrabold">{P.inspecoes}</p><p className="text-[11px] text-slate-300">inspeções de qualidade</p></div>
+                        <div className="bg-white/5 rounded-xl p-3"><p className="text-2xl font-extrabold">{P.conformidade != null ? P.conformidade + '%' : '—'}</p><p className="text-[11px] text-slate-300">itens aprovados</p></div>
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                      <h4 className="font-bold text-slate-800">Etapas da obra</h4>
+                      {P.etapas.length === 0 && <p className="text-sm text-slate-400">O cronograma ainda não foi publicado.</p>}
+                      {P.etapas.map((e, k) => { const st = Number(e.avanco) >= 100 ? 'Concluída' : Number(e.avanco) > 0 ? 'Em andamento' : (e.inicio && e.inicio <= hoje ? 'Iniciando' : 'A iniciar'); return (
+                        <div key={k} className="space-y-1">
+                          <div className="flex justify-between text-sm"><span className="font-semibold text-slate-800">{e.nome}</span><span className="text-xs text-slate-500">{e.inicio ? `${fmtData(e.inicio)} a ${fmtData(e.fim)}` : ''} · <b className={st === 'Concluída' ? 'text-emerald-700' : 'text-slate-700'}>{st === 'Concluída' ? 'Concluída' : `${Number(e.avanco).toFixed(0)}%`}</b></span></div>
+                          <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full ${st === 'Concluída' ? 'bg-emerald-500' : 'bg-amber-500'}`} style={{ width: e.avanco + '%' }} /></div>
+                        </div>
+                      ); })}
+                    </div>
+
+                    {fotos.length > 0 && (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                        <h4 className="font-bold text-slate-800">Fotos recentes</h4>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          {fotos.slice(0, 12).map(f => (
+                            <button key={f.caminho} type="button" onClick={() => setFotoGrande(f)} className="relative aspect-[4/3] bg-slate-100 rounded-lg overflow-hidden">
+                              {portalFotos[f.caminho] && <img src={portalFotos[f.caminho]} alt={f.legenda || 'Foto da obra'} className="w-full h-full object-cover" />}
+                              <span className="absolute bottom-0 inset-x-0 bg-black/50 text-white text-[10px] px-1.5 py-0.5 text-left truncate">{fmtData(f.dia)}{f.legenda ? ' · ' + f.legenda : ''}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                        <h4 className="font-bold text-slate-800">Diário da obra</h4>
+                        {P.diarios.length === 0 && <p className="text-sm text-slate-400">Nenhum registro ainda.</p>}
+                        <ul className="space-y-3 max-h-[480px] overflow-y-auto pr-1">
+                          {P.diarios.slice(0, 15).map(d => (
+                            <li key={d.dia} className="border-l-2 border-amber-400 pl-3">
+                              <p className="text-xs font-bold text-slate-500">{fmtData(d.dia)} · {d.clima_manha === d.clima_tarde ? d.clima_manha : `${d.clima_manha} / ${d.clima_tarde}`}{d.fotos.length ? ` · ${d.fotos.length} foto(s)` : ''}</p>
+                              <p className="text-sm text-slate-800">{d.servicos || '—'}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                        <h4 className="font-bold text-slate-800">Pagamentos</h4>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="bg-emerald-50 rounded-xl p-3"><p className="text-[11px] font-bold uppercase text-emerald-800">Pago</p><p className="text-lg font-extrabold text-emerald-900">{formatBRL(totPago)}</p></div>
+                          <div className="bg-slate-50 rounded-xl p-3"><p className="text-[11px] font-bold uppercase text-slate-500">A pagar</p><p className="text-lg font-extrabold">{formatBRL(totAPagar)}</p></div>
+                        </div>
+                        {prox && <p className="text-sm text-slate-600">Próximo: <b>{prox.descricao}</b> — {formatBRL(prox.valor)} em {fmtData(prox.vencimento)}</p>}
+                        <table className="w-full text-sm">
+                          <tbody className="divide-y divide-slate-100">
+                            {P.pagamentos.map((x, k) => (
+                              <tr key={k}><td className="py-2 text-xs whitespace-nowrap">{fmtData(x.status === 'Recebido' ? x.recebido_em : x.vencimento)}</td><td className="py-2">{x.descricao}</td><td className="py-2 text-right font-bold whitespace-nowrap">{formatBRL(x.valor)}</td><td className="py-2 pl-2"><span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${x.status === 'Recebido' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{x.status === 'Recebido' ? 'Pago' : 'A pagar'}</span></td></tr>
+                            ))}
+                            {P.pagamentos.length === 0 && <tr><td className="py-4 text-center text-slate-400">Nenhum pagamento lançado.</td></tr>}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {aba === 'usuarios' && (
                 <div className="space-y-4">
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
                     Para incluir alguém, peça que a pessoa clique em <strong>"Criar conta"</strong> na tela de entrada.
                     A conta aparece aqui como <strong>aguardando liberação</strong>: escolha o perfil e clique em <strong>Liberar</strong>.
+                    Para o dono da obra, escolha o perfil <strong>Cliente</strong> e marque a obra dele: ele verá só o portal dessa obra.
                   </div>
                   <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
                     <table className="w-full text-sm text-left">
@@ -3256,6 +3389,14 @@
                                 className="border border-slate-300 rounded-lg px-2 py-1 text-xs font-bold">
                                 {Object.keys(PERMISSOES).map(k => <option key={k} value={k}>{k}</option>)}
                               </select>
+                              {p.perfil === 'Cliente' && (
+                                <div className="mt-2 space-y-1">
+                                  <p className="text-[10px] font-bold uppercase text-slate-500">Vê no portal:</p>
+                                  {data.obras.map(o => { const marc = data.clienteObras.some(x => x.perfil_id === p.id && x.obra_id === o.id); return (
+                                    <label key={o.id} className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={marc} onChange={e => alternarObraCliente(p, o.id, e.target.checked)} />{o.nome}</label>
+                                  ); })}
+                                </div>
+                              )}
                             </td>
                             <td className="px-6 py-3 whitespace-nowrap">
                               {p.ativo
@@ -3531,6 +3672,13 @@
                   ); })}
                 </ul>
               </div>
+            </div>
+          )}
+
+          {fotoGrande && (
+            <div className="fixed inset-0 bg-black/85 flex flex-col items-center justify-center p-4 z-50" onClick={() => setFotoGrande(null)}>
+              {portalFotos[fotoGrande.caminho] && <img src={portalFotos[fotoGrande.caminho]} alt={fotoGrande.legenda || 'Foto da obra'} className="max-h-[85vh] max-w-full rounded-lg" />}
+              <p className="text-white text-sm mt-3">{fmtData(fotoGrande.dia)}{fotoGrande.legenda ? ' · ' + fotoGrande.legenda : ''}</p>
             </div>
           )}
 
