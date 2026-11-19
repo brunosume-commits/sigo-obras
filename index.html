@@ -684,6 +684,7 @@
       const [filtroPend, setFiltroPend] = useState('abertas');
       const [portalObra, setPortalObra] = useState('');
       const [souAdmin, setSouAdmin] = useState(false);
+      const [userForm, setUserForm] = useState(null);   // administradores: criar / editar / nova senha
       const [consObra, setConsObra] = useState('');
       const [consPeriodo, setConsPeriodo] = useState('obra');
       const [analise, setAnalise] = useState({ chave: '', linhas: [] });
@@ -1327,6 +1328,33 @@
             forns: data.cotacaoForns.filter(f => f.cotacao_id === c.id).map(f => f.fornecedor_id) }
           : { obraId: primeiraObra(), titulo: '', obs: '', itens: [{ materialId: data.materiais[0]?.id || '', qtd: '' }], forns: data.fornecedores.slice(0, 3).map(f => f.id) });
       };
+      // ---------- Usuários (só administradores) ----------
+      const gerarSenha = () => { const c = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const a = new Uint32Array(10); crypto.getRandomValues(a); return Array.from(a, n => c[n % c.length]).join(''); };
+      const adminUsuarios = async (corpo) => {
+        const { data: r, error } = await sb.functions.invoke('admin-usuarios', { body: corpo });
+        if (error) { let msg = error.message; try { const j = await error.context.json(); msg = j.erro || msg; } catch (e) {} throw new Error(msg); }
+        if (r?.erro) throw new Error(r.erro);
+        return r;
+      };
+      const abrirUsuario = (modo, p) => setUserForm(modo === 'criar'
+        ? { modo, nome: '', email: '', perfil: 'Mestre de Obras', senha: gerarSenha(), ver: true, obras: [] }
+        : modo === 'senha' ? { modo, id: p.id, nome: p.nome, email: p.email, senha: gerarSenha(), ver: true }
+        : { modo, id: p.id, nome: p.nome, email: p.email || '', perfil: p.perfil, ativo: p.ativo, obras: data.clienteObras.filter(x => x.perfil_id === p.id).map(x => x.obra_id) });
+      const salvarUsuario = async (ev) => {
+        ev.preventDefault();
+        const f = userForm;
+        if ((f.modo === 'criar' || f.modo === 'senha') && f.senha.length < 8) { alert('A senha precisa ter pelo menos 8 caracteres.'); return; }
+        setEnviando(true);
+        try {
+          if (f.modo === 'criar') await adminUsuarios({ acao: 'criar', nome: f.nome, email: f.email, senha: f.senha, perfil: f.perfil, obras: f.obras });
+          else if (f.modo === 'editar') await adminUsuarios({ acao: 'editar', id: f.id, nome: f.nome, email: f.email, perfil: f.perfil, ativo: f.ativo, obras: f.obras });
+          else await adminUsuarios({ acao: 'senha', id: f.id, senha: f.senha });
+          await recarregar();
+          setUserForm(f.modo === 'editar' ? null : { modo: 'pronto', nome: f.nome, email: f.email.trim().toLowerCase(), senha: f.senha, nova: f.modo === 'criar' });
+        } catch (err) { alert(err.message); }
+        finally { setEnviando(false); }
+      };
+
       // ---------- Dados da construtora ----------
       const CAMPOS_EMPRESA = ['razao_social', 'nome_fantasia', 'cnpj', 'endereco', 'cidade_uf', 'telefone', 'email', 'site', 'responsavel_tecnico', 'registro_crea', 'logo'];
       const formEmpresa = empForm || Object.fromEntries(CAMPOS_EMPRESA.map(c => [c, data.empresa?.[c] || '']));
@@ -4676,8 +4704,14 @@
 
               {aba === 'usuarios' && (
                 <div className="space-y-4">
+                  {souAdmin && (
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <p className="text-xs text-slate-500">Como administrador, você pode criar usuários, editar os dados e definir uma nova senha. As senhas ficam embaralhadas no Supabase: ninguém consegue ver a senha atual de uma pessoa.</p>
+                      <button type="button" onClick={() => abrirUsuario('criar')} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Criar usuário</button>
+                    </div>
+                  )}
                   <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-900">
-                    Para incluir alguém, peça que a pessoa clique em <strong>"Criar conta"</strong> na tela de entrada.
+                    Para incluir alguém, {souAdmin ? <>use <strong>Criar usuário</strong> ou </> : ''}peça que a pessoa clique em <strong>"Criar conta"</strong> na tela de entrada.
                     A conta aparece aqui como <strong>aguardando liberação</strong>: escolha o perfil e clique em <strong>Liberar</strong>.
                     Para o dono da obra, escolha o perfil <strong>Cliente</strong> e marque a obra dele: ele verá só o portal dessa obra.
                   </div>
@@ -4714,6 +4748,7 @@
                               {p.ativo
                                 ? <><span className="text-xs font-bold text-emerald-700 mr-2">Ativo</span>{p.id !== user.id && <BtnAcao perigo onClick={() => alterarPerfilUsuario(p, { ativo: false })}>Desativar</BtnAcao>}</>
                                 : <><span className="text-xs font-bold text-amber-700 mr-2">Aguardando liberação</span><BtnAcao onClick={() => alterarPerfilUsuario(p, { ativo: true })}>Liberar</BtnAcao></>}
+                              {souAdmin && <div className="mt-1.5"><BtnAcao onClick={() => abrirUsuario('editar', p)}>Editar</BtnAcao><BtnAcao onClick={() => abrirUsuario('senha', p)}>Nova senha</BtnAcao></div>}
                             </td>
                           </tr>
                         ))}
@@ -5190,6 +5225,63 @@
                   <div className="border-t border-slate-400 pt-1">Diretoria / Contratante</div>
                 </div>
               </RelImpresso>
+            );
+          })()}
+
+          {userForm && souAdmin && (() => {
+            const f = userForm, set = (c, v) => setUserForm({ ...f, [c]: v });
+            const inp = 'w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900', lbl = 'block text-xs font-bold uppercase text-slate-500';
+            if (f.modo === 'pronto') {
+              const texto = `Acesso ao SIGO\nSite: https://brunosume-commits.github.io/sigo-obras/\nLogin: ${f.email}\nSenha: ${f.senha}`;
+              return (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                  <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 text-sm">
+                    <h3 className="text-lg font-extrabold">{f.nova ? 'Usuário criado' : 'Senha alterada'}</h3>
+                    <p>Passe estes dados para <b>{f.nome}</b>. A senha não fica guardada à vista: anote ou envie agora.</p>
+                    <pre className="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs whitespace-pre-wrap">{texto}</pre>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button type="button" onClick={() => { navigator.clipboard?.writeText(texto); }} className="px-4 py-2 border rounded-lg font-bold">Copiar</button>
+                      <a href={`https://wa.me/?text=${encodeURIComponent(texto)}`} target="_blank" rel="noopener" className="px-4 py-2 border border-emerald-300 text-emerald-800 rounded-lg font-bold">WhatsApp</a>
+                      <button type="button" onClick={() => setUserForm(null)} className="px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Fechar</button>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            const campoSenha = (
+              <label className={lbl}>{f.modo === 'senha' ? 'Nova senha' : 'Senha inicial'}
+                <div className="flex gap-2 mt-1">
+                  <input type={f.ver ? 'text' : 'password'} value={f.senha} onChange={e => set('senha', e.target.value)} minLength={8} autoComplete="new-password" className="flex-1 border rounded-lg px-3 py-2 text-sm font-normal normal-case text-slate-900 font-mono" required />
+                  <button type="button" onClick={() => set('ver', !f.ver)} className="px-3 border rounded-lg text-xs font-bold normal-case">{f.ver ? 'Ocultar' : 'Mostrar'}</button>
+                  <button type="button" onClick={() => setUserForm({ ...f, senha: gerarSenha(), ver: true })} className="px-3 border rounded-lg text-xs font-bold normal-case">Gerar</button>
+                </div>
+                <span className="block mt-1 text-[11px] font-normal normal-case text-slate-500">Mínimo de 8 caracteres. A pessoa pode trocar depois em "Esqueci a senha".</span>
+              </label>
+            );
+            return (
+              <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                <form onSubmit={salvarUsuario} className="bg-white rounded-2xl max-w-md w-full p-6 space-y-3 text-sm max-h-[95vh] overflow-y-auto">
+                  <h3 className="text-lg font-extrabold">{f.modo === 'criar' ? 'Criar usuário' : f.modo === 'senha' ? `Nova senha — ${f.nome}` : `Editar — ${f.nome}`}</h3>
+                  {f.modo === 'senha' ? (<><p className="text-slate-600">{f.email}</p>{campoSenha}</>) : (<>
+                    <label className={lbl}>Nome<input value={f.nome} onChange={e => set('nome', e.target.value)} className={inp} required /></label>
+                    <label className={lbl}>E-mail (login)<input type="email" value={f.email} onChange={e => set('email', e.target.value)} className={inp} required /></label>
+                    <label className={lbl}>Perfil
+                      <select value={f.perfil} disabled={f.id === user.id} onChange={e => set('perfil', e.target.value)} className={inp}>{Object.keys(PERMISSOES).map(k => <option key={k} value={k}>{k}</option>)}</select>
+                    </label>
+                    {f.perfil === 'Cliente' && (
+                      <div className="space-y-1"><p className={lbl}>Obras que o cliente vê</p>
+                        {data.obras.map(o => <label key={o.id} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={f.obras.includes(o.id)} onChange={e => set('obras', e.target.checked ? [...f.obras, o.id] : f.obras.filter(x => x !== o.id))} />{o.nome}</label>)}
+                      </div>
+                    )}
+                    {f.modo === 'editar' && f.id !== user.id && <label className="flex items-center gap-2 text-sm font-semibold"><input type="checkbox" checked={f.ativo} onChange={e => set('ativo', e.target.checked)} /> Acesso ativo</label>}
+                    {f.modo === 'criar' && campoSenha}
+                  </>)}
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button type="button" onClick={() => setUserForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">{f.modo === 'criar' ? 'Criar' : 'Salvar'}</button>
+                  </div>
+                </form>
+              </div>
             );
           })()}
 
