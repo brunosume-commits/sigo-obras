@@ -61,6 +61,7 @@
         wallet: <><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>,
         book: <><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8"/><path d="M8 11h6"/></>,
         camera: <><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>,
+        gauge: <><path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></>,
         eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></>,
         check: <><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></>,
         trending: <><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>,
@@ -169,7 +170,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'consumo', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -179,8 +180,8 @@
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
-        abas: ['materiais', 'obras', 'orcamento', 'diario', 'qualidade', 'compras', 'funcionarios', 'epi', 'documentos'],
-        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar', 'orcamento.avanco'],
+        abas: ['materiais', 'obras', 'orcamento', 'consumo', 'diario', 'qualidade', 'compras', 'funcionarios', 'epi', 'documentos'],
+        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar', 'orcamento.avanco', 'producao.lancar'],
       },
       'Cliente': {
         abaInicial: 'portal',
@@ -193,7 +194,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -326,8 +327,11 @@
         sb.from('pendencias').select('*').order('criado_em', { ascending: false }).limit(1000),
         eng ? sb.rpc('portal_cliente', {}) : Promise.resolve({ data: [] }),
         eng ? sb.from('cliente_obras').select('*') : Promise.resolve({ data: [] }),
+        sb.from('servicos_producao').select('*').order('nome', { ascending: true }),
+        sb.from('indices_consumo').select('*'),
+        (eng || perfil === 'Mestre de Obras') ? sb.from('producoes').select('*').order('dia', { ascending: false }).order('criado_em', { ascending: false }).limit(3000) : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes] = (await Promise.all(consultas)).map(ok);
       const inspItens = inspecoes.length ? ok(await sb.from('inspecao_itens').select('*').in('inspecao_id', inspecoes.map(i => i.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
@@ -374,6 +378,8 @@
         inspecoes: inspecoes.map(i => ({ ...i, itens: inspItens.filter(x => x.inspecao_id === i.id) })),
         pendencias,
         portal: portal || [], clienteObras,
+        servicos, indices: indices.map(i => ({ ...i, consumo: num(i.consumo), tolerancia_pct: num(i.tolerancia_pct) })),
+        producoes: producoes.map(x => ({ ...x, quantidade: num(x.quantidade) })),
       };
     }
 
@@ -450,6 +456,11 @@
       const [filtroPend, setFiltroPend] = useState('abertas');
       const [portalObra, setPortalObra] = useState('');
       const [souAdmin, setSouAdmin] = useState(false);
+      const [consObra, setConsObra] = useState('');
+      const [consPeriodo, setConsPeriodo] = useState('obra');
+      const [analise, setAnalise] = useState({ chave: '', linhas: [] });
+      const [prodForm, setProdForm] = useState(null);
+      const [servForm, setServForm] = useState(null);
       useEffect(() => {
         if (user?.perfil !== 'Engenheiro') { setSouAdmin(false); return; }
         sb.rpc('sou_administrador', {}).then(({ data: r }) => setSouAdmin(r === true), () => setSouAdmin(false));
@@ -906,6 +917,57 @@
         const { data: u, error } = await sb.storage.from('documentos').createSignedUrl(doc.arquivo, 600);
         if (error || !u?.signedUrl) { janela && janela.close(); return alert('Não foi possível abrir o arquivo.'); }
         if (janela) janela.location.href = u.signedUrl; else window.location.href = u.signedUrl;
+      };
+
+      // ---------- Consumo previsto x real ----------
+      const consObraId = (selectedObra !== 'ALL' ? selectedObra : (consObra || data.obras.find(o => o.status === 'Em andamento')?.id || data.obras[0]?.id)) || '';
+      const periodoConsumo = (() => {
+        const h = hojeISO(), ob = data.obras.find(o => o.id === consObraId);
+        if (consPeriodo === 'mes') return [h.slice(0, 8) + '01', h];
+        if (consPeriodo === 'mes_ant') { const d = new Date(); d.setDate(0); const f = isoLocal(d); return [f.slice(0, 8) + '01', f]; }
+        if (consPeriodo === '30d') return [somaDias(-30), h];
+        return [ob?.inicio || '2000-01-01', h];
+      })();
+      const chaveAnalise = [consObraId, ...periodoConsumo, data.producoes.length, data.movimentacoes.length, data.indices.length].join('|');
+      useEffect(() => {
+        if (!consObraId || !user || !['Engenheiro', 'Mestre de Obras'].includes(user.perfil) || !data.indices.length) return;
+        sb.rpc('analise_consumo', { p_obra: consObraId, p_ini: periodoConsumo[0], p_fim: periodoConsumo[1] })
+          .then(({ data: r }) => setAnalise({ chave: chaveAnalise, linhas: (r || []).map(x => ({ ...x, previsto: Number(x.previsto), realizado: Number(x.realizado), tolerancia: Number(x.tolerancia) })) }), () => {});
+      }, [chaveAnalise, user?.perfil]);
+      const precoMaterial = (mid) => { const cs = data.compras.filter(c => c.materialId === mid && c.precoUnit > 0).sort((a, b) => (b.dataSolicitacao || '').localeCompare(a.dataSolicitacao || '')); return cs[0]?.precoUnit || 0; };
+      const perdaPct = (l) => l.previsto > 0 ? (l.realizado - l.previsto) / l.previsto * 100 : null;
+      const consumoAlertas = analise.linhas.filter(l => { const p = perdaPct(l); return p !== null && p > l.tolerancia; }).length;
+      const abrirProducao = () => {
+        const sv = data.servicos.filter(x => x.ativo);
+        if (!sv.length) return alert(user.perfil === 'Engenheiro' ? 'Cadastre primeiro os serviços e seus índices de consumo (botão Serviços e índices).' : 'O Engenheiro ainda não cadastrou os serviços.');
+        setProdForm({ obraId: consObraId, servicoId: sv[0].id, quantidade: '', dia: hojeISO(), local: '', equipe: '', etapaId: '' });
+      };
+      const salvarProducao = async (ev) => {
+        ev.preventDefault();
+        const f = prodForm, q = numBR(f.quantidade);
+        if (!(q > 0)) return alert('Informe a quantidade executada.');
+        if (f.dia > hojeISO()) return alert('A data não pode ser futura.');
+        if (await executar(async () => ok(await sb.from('producoes').insert({ obra_id: f.obraId, servico_id: f.servicoId, quantidade: q, dia: f.dia, local: f.local.trim(), equipe: f.equipe.trim(), etapa_id: f.etapaId || null, registrado_por: user.nome })))) setProdForm(null);
+      };
+      const excluirProducao = (x) => { if (confirm('Excluir este lançamento de produção?')) executar(async () => ok(await sb.from('producoes').delete().eq('id', x.id))); };
+      const abrirServico = (sv) => setServForm(sv ? { id: sv.id, nome: sv.nome, unidade: sv.unidade, ativo: sv.ativo,
+          itens: data.indices.filter(i => i.servico_id === sv.id).map(i => ({ materialId: i.material_id, consumo: String(i.consumo).replace('.', ','), tol: String(i.tolerancia_pct).replace('.', ',') })) }
+        : { nome: '', unidade: 'm²', ativo: true, itens: [{ materialId: data.materiais[0]?.id || '', consumo: '', tol: '5' }] });
+      const salvarServico = async (ev) => {
+        ev.preventDefault();
+        const f = servForm;
+        const itens = f.itens.filter(i => i.materialId && numBR(i.consumo) > 0);
+        if (!f.nome.trim() || !itens.length) return alert('Informe o nome do serviço e pelo menos um material com o consumo por unidade.');
+        if (new Set(itens.map(i => i.materialId)).size !== itens.length) return alert('O mesmo material aparece duas vezes.');
+        const okS = await executar(async () => {
+          const reg = { nome: f.nome.trim(), unidade: f.unidade.trim() || 'un', ativo: f.ativo };
+          let id = f.id;
+          if (id) ok(await sb.from('servicos_producao').update(reg).eq('id', id));
+          else id = ok(await sb.from('servicos_producao').insert(reg).select().single()).id;
+          ok(await sb.from('indices_consumo').delete().eq('servico_id', id));
+          ok(await sb.from('indices_consumo').insert(itens.map(i => ({ servico_id: id, material_id: i.materialId, consumo: numBR(i.consumo), tolerancia_pct: numBR(i.tol) || 0 }))));
+        });
+        if (okS) setServForm(null);
       };
 
       // ---------- Portal do cliente ----------
@@ -1482,10 +1544,11 @@
       }
 
       const menuItems = [
-        { id: 'materiais', label: 'Controle de Materiais', icon: 'package', badge: alertasEstoque.length || null },
         { id: 'dashboard', label: 'Painel Principal', icon: 'dashboard' },
+        { id: 'materiais', label: 'Controle de Materiais', icon: 'package', badge: alertasEstoque.length || null },
         { id: 'obras', label: 'Cadastro de Obras', icon: 'building' },
         { id: 'orcamento', label: 'Orçamento e Cronograma', icon: 'calendar', badge: etapasAtrasadas || null },
+        { id: 'consumo', label: 'Consumo e Perdas', icon: 'gauge', badge: consumoAlertas || null },
         { id: 'diario', label: 'Diário de Obra', icon: 'book' },
         { id: 'qualidade', label: 'Qualidade e Pendências', icon: 'check', badge: pendAtrasadas || null },
         { id: 'compras', label: 'Compras & Fornecedores', icon: 'cart' },
@@ -2427,6 +2490,102 @@
                         </tbody>
                       </table>
                     </div>
+                  </div>
+                );
+              })()}
+
+              {aba === 'consumo' && (() => {
+                const eng = user.perfil === 'Engenheiro';
+                const linhas = analise.chave === chaveAnalise ? analise.linhas : analise.linhas;
+                const comPerda = linhas.map(l => { const p = perdaPct(l), preco = precoMaterial(l.material_id); return { ...l, mat: getMat(l.material_id), pct: p, custo: Math.max(0, l.realizado - l.previsto) * preco, preco }; })
+                  .sort((a, b) => (b.pct ?? 999) - (a.pct ?? 999));
+                const acima = comPerda.filter(l => l.pct !== null && l.pct > l.tolerancia);
+                const custoPerda = acima.reduce((s, l) => s + l.custo, 0);
+                const prods = data.producoes.filter(x => x.obra_id === consObraId && x.dia >= periodoConsumo[0] && x.dia <= periodoConsumo[1]);
+                const porServico = data.servicos.map(sv => ({ sv, q: prods.filter(x => x.servico_id === sv.id).reduce((s, x) => s + x.quantidade, 0) })).filter(x => x.q > 0);
+                const fmtQ = (q) => Number(q).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Consumo previsto x real</h3>
+                        <p className="text-xs text-slate-500">Produção lançada × índice de consumo = o que deveria ter saído do estoque. Comparado com as saídas reais, mostra a perda de cada material.</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {selectedObra === 'ALL' && <select value={consObraId} onChange={e => setConsObra(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold">{data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}</select>}
+                        <select value={consPeriodo} onChange={e => setConsPeriodo(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" aria-label="Período">
+                          <option value="obra">Desde o início da obra</option><option value="mes">Este mês</option><option value="mes_ant">Mês passado</option><option value="30d">Últimos 30 dias</option>
+                        </select>
+                        {eng && <button type="button" onClick={() => abrirServico(null)} className="px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100">Serviços e índices</button>}
+                        {can('producao.lancar') && <button type="button" onClick={abrirProducao} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Lançar produção</button>}
+                      </div>
+                    </div>
+
+                    {data.indices.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-sm text-slate-600 space-y-2">
+                        <p className="font-bold text-slate-800">Para começar</p>
+                        <p>1. {eng ? <>Em <b>Serviços e índices</b>, cadastre cada serviço e quanto ele gasta de cada material por unidade. Ex.: <i>Alvenaria bloco 14 (m²)</i> → 13,5 blocos e 0,4 saco de argamassa por m².</> : 'O Engenheiro cadastra os serviços e os índices de consumo.'}</p>
+                        <p>2. O Mestre lança a produção do dia em <b>Lançar produção</b> (ex.: 42 m² de alvenaria).</p>
+                        <p>3. As saídas de material continuam sendo lançadas no Controle de Materiais. O SIGO compara as duas coisas.</p>
+                      </div>
+                    ) : (<>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className={`border rounded-xl p-4 ${acima.length ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}><p className="text-xs text-slate-500 font-bold uppercase">Materiais acima da tolerância</p><p className={`text-2xl font-extrabold ${acima.length ? 'text-red-700' : 'text-emerald-700'}`}>{acima.length}</p><p className="text-xs text-slate-500">{acima[0] ? `maior: ${acima[0].mat?.nome} (+${acima[0].pct.toFixed(1)}%)` : 'tudo dentro do esperado'}</p></div>
+                        {eng && <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Custo da perda acima do previsto</p><p className="text-2xl font-extrabold">{formatBRL(custoPerda)}</p><p className="text-xs text-slate-500">pelo último preço de compra</p></div>}
+                        <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Produção lançada no período</p><p className="text-sm font-semibold mt-1">{porServico.length ? porServico.map(x => `${fmtQ(x.q)} ${x.sv.unidade} de ${x.sv.nome.replace(' (exemplo)', '')}`).join(' · ') : 'nenhuma'}</p></div>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                        <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Por material — {fmtData(periodoConsumo[0])} a {fmtData(periodoConsumo[1])}</h4></div>
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                            <tr><th className="px-4 py-3">Material</th><th className="px-4 py-3 text-right">Previsto</th><th className="px-4 py-3 text-right">Saiu do estoque</th><th className="px-4 py-3 text-right">Diferença</th><th className="px-4 py-3 text-right">Perda</th><th className="px-4 py-3 text-right">Tolerância</th>{eng && <th className="px-4 py-3 text-right">Custo</th>}</tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {comPerda.length === 0 && <tr><td colSpan={7} className="px-6 py-8 text-center text-slate-400">Sem produção nem saídas desses materiais no período.</td></tr>}
+                            {comPerda.map(l => { const ruim = l.pct !== null && l.pct > l.tolerancia; return (
+                              <tr key={l.material_id} className={ruim ? 'bg-red-50/60' : ''}>
+                                <td className="px-4 py-2 font-semibold">{l.mat?.nome}</td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap">{fmtQ(l.previsto)} {l.mat?.unidade}</td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap">{fmtQ(l.realizado)} {l.mat?.unidade}</td>
+                                <td className={`px-4 py-2 text-right whitespace-nowrap ${l.realizado > l.previsto ? 'text-red-700' : 'text-emerald-700'}`}>{l.realizado >= l.previsto ? '+' : '−'}{fmtQ(Math.abs(l.realizado - l.previsto))}</td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap">{l.pct === null ? <span className="text-xs text-amber-700 font-bold">saiu sem produção lançada</span> : <span className={`font-bold ${ruim ? 'text-red-700' : l.pct < -10 ? 'text-amber-700' : 'text-emerald-700'}`}>{l.pct > 0 ? '+' : ''}{l.pct.toFixed(1)}%</span>}{l.pct !== null && l.pct < -10 && <span className="block text-[10px] text-amber-700">produção a mais ou saída não lançada?</span>}</td>
+                                <td className="px-4 py-2 text-right">{l.tolerancia}%</td>
+                                {eng && <td className="px-4 py-2 text-right whitespace-nowrap">{l.custo > 0 ? formatBRL(l.custo) : '—'}</td>}
+                              </tr>
+                            ); })}
+                          </tbody>
+                        </table>
+                        <p className="px-6 py-3 text-[11px] text-slate-500">Perda acima da tolerância fica em vermelho: confira desperdício, traço, quebra no transporte ou material desviado. Perda muito negativa costuma ser produção lançada a mais ou saída de material que não foi registrada.</p>
+                      </div>
+
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                          <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Produção lançada</h4></div>
+                          <table className="w-full text-sm">
+                            <tbody className="divide-y divide-slate-100">
+                              {prods.length === 0 && <tr><td className="px-6 py-6 text-center text-slate-400">Nenhum lançamento no período.</td></tr>}
+                              {prods.slice(0, 40).map(x => { const sv = data.servicos.find(v => v.id === x.servico_id); return (
+                                <tr key={x.id}>
+                                  <td className="px-4 py-2 text-xs whitespace-nowrap">{fmtData(x.dia)}</td>
+                                  <td className="px-4 py-2"><p className="font-semibold text-slate-800">{fmtQ(x.quantidade)} {sv?.unidade} · {sv?.nome}</p><p className="text-[11px] text-slate-500">{[x.local, x.equipe, x.registrado_por].filter(Boolean).join(' · ')}</p></td>
+                                  <td className="px-4 py-2 text-right"><BtnAcao perigo onClick={() => excluirProducao(x)}>Excluir</BtnAcao></td>
+                                </tr>
+                              ); })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3">
+                          <h4 className="font-bold text-slate-800">Serviços e índices de consumo</h4>
+                          {data.servicos.map(sv => (
+                            <div key={sv.id} className={`border rounded-xl p-3 ${sv.ativo ? 'border-slate-200' : 'border-dashed border-slate-300 opacity-60'}`}>
+                              <div className="flex justify-between items-center"><p className="font-semibold text-slate-800 text-sm">{sv.nome} <span className="text-xs text-slate-500">(por {sv.unidade})</span></p>{eng && <BtnAcao onClick={() => abrirServico(sv)}>Editar</BtnAcao>}</div>
+                              <p className="text-xs text-slate-600 mt-1">{data.indices.filter(i => i.servico_id === sv.id).map(i => { const m = getMat(i.material_id); return `${fmtQ(i.consumo)} ${m?.unidade} de ${m?.nome} (±${i.tolerancia_pct}%)`; }).join(' · ')}</p>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </>)}
                   </div>
                 );
               })()}
@@ -3688,6 +3847,73 @@
                     </li>
                   ); })}
                 </ul>
+              </div>
+            </div>
+          )}
+
+          {prodForm && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                <h3 className="text-lg font-extrabold">Lançar produção</h3>
+                <form onSubmit={salvarProducao} className="space-y-3 text-sm">
+                  <select value={prodForm.obraId} onChange={e => setProdForm({ ...prodForm, obraId: e.target.value, etapaId: '' })} className="w-full border rounded-lg px-3 py-2">{data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}</select>
+                  <label className="block text-xs font-bold uppercase text-slate-500">Serviço executado
+                    <select value={prodForm.servicoId} onChange={e => setProdForm({ ...prodForm, servicoId: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900">
+                      {data.servicos.filter(x => x.ativo).map(x => <option key={x.id} value={x.id}>{x.nome} ({x.unidade})</option>)}
+                    </select>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs font-bold uppercase text-slate-500">Quantidade ({data.servicos.find(x => x.id === prodForm.servicoId)?.unidade})
+                      <input inputMode="decimal" value={prodForm.quantidade} onChange={e => setProdForm({ ...prodForm, quantidade: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" required />
+                    </label>
+                    <label className="text-xs font-bold uppercase text-slate-500">Dia
+                      <input type="date" value={prodForm.dia} onChange={e => setProdForm({ ...prodForm, dia: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" required />
+                    </label>
+                  </div>
+                  <input value={prodForm.local} onChange={e => setProdForm({ ...prodForm, local: e.target.value })} placeholder="Local (ex.: 2º pavimento, apto 201)" className="w-full border rounded-lg px-3 py-2" />
+                  <input value={prodForm.equipe} onChange={e => setProdForm({ ...prodForm, equipe: e.target.value })} placeholder="Equipe (ex.: José Carlos e Antônio)" className="w-full border rounded-lg px-3 py-2" />
+                  {data.etapas.some(x => x.obra_id === prodForm.obraId) && (
+                    <select value={prodForm.etapaId} onChange={e => setProdForm({ ...prodForm, etapaId: e.target.value })} className="w-full border rounded-lg px-3 py-2"><option value="">Etapa: —</option>{data.etapas.filter(x => x.obra_id === prodForm.obraId).map(x => <option key={x.id} value={x.id}>Etapa: {x.nome}</option>)}</select>
+                  )}
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setProdForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Lançar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {servForm && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                <h3 className="text-lg font-extrabold">{servForm.id ? 'Editar serviço' : 'Novo serviço e índices'}</h3>
+                <form onSubmit={salvarServico} className="space-y-3 text-sm">
+                  <div className="grid grid-cols-3 gap-2">
+                    <input value={servForm.nome} onChange={e => setServForm({ ...servForm, nome: e.target.value })} placeholder="Ex.: Alvenaria bloco 14x19x29" className="col-span-2 border rounded-lg px-3 py-2" required />
+                    <input value={servForm.unidade} onChange={e => setServForm({ ...servForm, unidade: e.target.value })} placeholder="m²" className="border rounded-lg px-3 py-2" aria-label="Unidade do serviço" />
+                  </div>
+                  <p className="text-xs font-bold uppercase text-slate-500">Consumo de material por {servForm.unidade || 'unidade'} de serviço</p>
+                  {servForm.itens.map((it, k) => {
+                    const set = (campo, v) => setServForm({ ...servForm, itens: servForm.itens.map((x, j) => j === k ? { ...x, [campo]: v } : x) });
+                    const m = getMat(it.materialId);
+                    return (
+                      <div key={k} className="grid grid-cols-12 gap-2 items-center">
+                        <select value={it.materialId} onChange={e => set('materialId', e.target.value)} className="col-span-6 border rounded-lg px-2 py-2">{data.materiais.map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}</select>
+                        <input inputMode="decimal" value={it.consumo} onChange={e => set('consumo', e.target.value)} placeholder={`${m?.unidade || ''} por ${servForm.unidade}`} className="col-span-3 border rounded-lg px-2 py-2" aria-label="Consumo" />
+                        <input inputMode="decimal" value={it.tol} onChange={e => set('tol', e.target.value)} placeholder="tol. %" className="col-span-2 border rounded-lg px-2 py-2" aria-label="Tolerância %" />
+                        <button type="button" onClick={() => setServForm({ ...servForm, itens: servForm.itens.filter((_, j) => j !== k) })} className="col-span-1 text-red-600 font-bold text-lg">×</button>
+                      </div>
+                    );
+                  })}
+                  <button type="button" onClick={() => setServForm({ ...servForm, itens: [...servForm.itens, { materialId: data.materiais[0]?.id || '', consumo: '', tol: '5' }] })} className="text-xs font-bold text-amber-700 hover:underline">+ Adicionar material</button>
+                  <p className="text-xs text-slate-500">Referências comuns (TCPO/SINAPI): alvenaria de bloco 14x19x29 ≈ 13,5 blocos/m²; concreto virado fck 25 ≈ 7 sacos de cimento, 0,55 m³ de areia e 0,7 m³ de brita por m³. Tolerâncias usuais: 3 a 5% para cimento, aço e blocos; 10 a 15% para areia, argamassa e madeira.</p>
+                  <label className="flex items-center gap-2"><input type="checkbox" checked={servForm.ativo} onChange={e => setServForm({ ...servForm, ativo: e.target.checked })} /> Aparece em Lançar produção</label>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setServForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                  </div>
+                </form>
               </div>
             </div>
           )}

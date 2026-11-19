@@ -9,6 +9,7 @@ begin
   if o is null then raise notice 'Obra de exemplo não encontrada.'; return; end if;
   select array_agg(id) into fs from funcionarios where obra_id = o;
 
+  delete from producoes where obra_id = o;
   delete from pendencias where obra_id = o;
   delete from inspecoes where obra_id = o;
   delete from cotacoes where obra_id = o;
