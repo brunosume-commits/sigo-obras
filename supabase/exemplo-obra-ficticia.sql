@@ -334,3 +334,50 @@ begin
     (o, 'Reparar tapume danificado pela chuva', '', 'Frente do terreno', 'Luiz Henrique Costa', '2026-11-25', 'Média', 'Aberta', 'Severino Alves da Silva', '2026-11-18 08:00-03', null, null),
     (o, 'Retirar entulho do térreo', 'Caçamba agendada', 'Térreo', 'Pedro Henrique Araújo', '2026-11-08', 'Baixa', 'Resolvida', 'Severino Alves da Silva', '2026-11-05 08:00-03', '2026-11-07 15:00-03', 'Severino Alves da Silva');
 end $$;
+-- ---------------- Consumo e produção da obra de exemplo ----------------
+do $$
+declare o uuid; s1 uuid := gen_random_uuid(); s2 uuid := gen_random_uuid(); s3 uuid := gen_random_uuid(); s4 uuid := gen_random_uuid();
+        et_f uuid; et_e uuid; w date; c numeric; k int := 0;
+        mat_id uuid;
+begin
+  select id into o from obras where nome = 'Residencial Vista do Cabo (exemplo)';
+  if o is null or exists (select 1 from producoes where obra_id = o) then return; end if;
+  select id into et_f from etapas where obra_id = o and nome = 'Fundações';
+  select id into et_e from etapas where obra_id = o and nome = 'Estrutura';
+  insert into servicos_producao (id, nome, unidade) values
+    (s1, 'Concreto virado na obra fck 25 (exemplo)', 'm³'), (s2, 'Armação (exemplo)', 'kg'),
+    (s3, 'Formas de madeira (exemplo)', 'm²'), (s4, 'Alvenaria bloco 14x19x29 (exemplo)', 'm²');
+  insert into indices_consumo (servico_id, material_id, consumo, tolerancia_pct)
+  select x.s, m.id, x.c, x.t from (values
+    (s1,'EX-001',7.0,5), (s1,'EX-003',0.55,10), (s1,'EX-004',0.45,5),
+    (s2,'EX-006',0.075,5), (s2,'EX-007',0.045,5), (s2,'EX-008',0.013,10),
+    (s3,'EX-011',0.55,15),
+    (s4,'EX-005',13.5,5), (s4,'EX-002',0.4,10)) x(s, cod, c, t)
+  join materiais m on m.codigo = x.cod;
+  -- produção semanal coerente com o que saiu do estoque (perdas diferentes por material)
+  for w in select distinct ((data at time zone 'America/Sao_Paulo')::date) from movimentacoes
+           where obra_id = o and tipo = 'Saída' and obs not like 'Entrega de EPI%' order by 1 loop
+    k := k + 1;
+    select coalesce(sum(qtd), 0) into c from movimentacoes mv join materiais m on m.id = mv.material_id
+      where mv.obra_id = o and mv.tipo = 'Saída' and m.codigo = 'EX-001' and (mv.data at time zone 'America/Sao_Paulo')::date = w;
+    if c > 0 then
+      insert into producoes (obra_id, servico_id, etapa_id, dia, quantidade, local, equipe, registrado_por)
+      values (o, s1, case when w < '2026-10-12' then et_f else et_e end, w, round(c / 7.0 / (1.04 + (k % 4) * 0.03), 1),
+              case when w < '2026-10-12' then 'Blocos e baldrames' else 'Pilares e laje' end, 'José Carlos / Antônio Marcos', 'Severino Alves da Silva');
+    end if;
+    select coalesce(sum(qtd), 0) into c from movimentacoes mv join materiais m on m.id = mv.material_id
+      where mv.obra_id = o and mv.tipo = 'Saída' and m.codigo = 'EX-006' and (mv.data at time zone 'America/Sao_Paulo')::date = w;
+    if c > 0 then
+      insert into producoes (obra_id, servico_id, etapa_id, dia, quantidade, local, equipe, registrado_por)
+      values (o, s2, case when w < '2026-10-12' then et_f else et_e end, w, round(c / 0.075 / (1.02 + (k % 3) * 0.02)),
+              case when w < '2026-10-12' then 'Blocos e baldrames' else 'Pilares e laje' end, 'Raimundo Nonato', 'Severino Alves da Silva');
+    end if;
+    select coalesce(sum(qtd), 0) into c from movimentacoes mv join materiais m on m.id = mv.material_id
+      where mv.obra_id = o and mv.tipo = 'Saída' and m.codigo = 'EX-011' and (mv.data at time zone 'America/Sao_Paulo')::date = w;
+    if c > 0 then
+      insert into producoes (obra_id, servico_id, etapa_id, dia, quantidade, local, equipe, registrado_por)
+      values (o, s3, case when w < '2026-10-12' then et_f else et_e end, w, round(c / 0.55 / (1.08 + (k % 3) * 0.02)),
+              case when w < '2026-10-12' then 'Baldrames' else 'Pilares e laje' end, 'Francisco das Chagas', 'Severino Alves da Silva');
+    end if;
+  end loop;
+end $$;
