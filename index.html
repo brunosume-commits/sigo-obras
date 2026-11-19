@@ -32,6 +32,9 @@
       body.imprimindo-ficha #root > div > *:not(.ficha-epi) { display: none !important; }
       body.imprimindo-ficha .ficha-epi { position: static !important; background: white !important; padding: 0 !important; }
       body.imprimindo-ficha .ficha-epi > div { box-shadow: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; }
+      body.imprimindo-rel #root { display: none !important; }
+      body.imprimindo-rel .ficha-rel { position: static !important; background: white !important; padding: 0 !important; display: block !important; }
+      body.imprimindo-rel .ficha-rel > div { box-shadow: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; max-width: none !important; padding: 0 !important; }
       .no-print { display: none !important; }
       body { background: white !important; }
     }
@@ -39,6 +42,7 @@
 </head>
 <body class="bg-slate-50 text-slate-900 font-sans antialiased">
   <div id="root"></div>
+  <div id="impressao"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useMemo, useCallback, useRef } = React;
@@ -160,6 +164,34 @@
     const UNID_EQUIV = { br: 'br', barra: 'br', barras: 'br', sc: 'sc', saco: 'sc', sacos: 'sc', m3: 'm3', 'm³': 'm3', un: 'un', und: 'un', unid: 'un', pc: 'un', 'pç': 'un', peca: 'un', kg: 'kg', m: 'm', mt: 'm', ml: 'm', par: 'par', pr: 'par', rl: 'rl', rolo: 'rl', lt: 'l', l: 'l', m2: 'm2', 'm²': 'm2', cx: 'cx', caixa: 'cx', t: 't', ton: 't' };
     const mesmaUnidade = (a, b) => { const n = (u) => { const x = semAcento(u).replace(/[^a-z0-9²³]/g, ''); return UNID_EQUIV[x] || x; }; return n(a) === n(b); };
     const fmtChave = (c) => String(c || '').replace(/(\d{4})(?=\d)/g, '$1 ');
+
+    // Documento para imprimir / salvar em PDF (fica fora do app, para sair limpo na impressão)
+    const RelImpresso = ({ titulo, cabecalho, paisagem, onFechar, children }) => {
+      const imprimir = () => { document.body.classList.add('imprimindo-rel'); window.print(); document.body.classList.remove('imprimindo-rel'); };
+      const agora = new Date();
+      return ReactDOM.createPortal(
+        <div className="ficha-rel fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+          {paisagem && <style>{'@media print { @page { size: A4 landscape; margin: 10mm; } }'}</style>}
+          <div className="bg-white rounded-2xl max-w-5xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-xs text-slate-900">
+            <div className="flex justify-between items-start gap-4 border-b-2 border-slate-900 pb-3">
+              <div>
+                <p className="font-black text-sm tracking-tight">SIGO <span className="font-semibold text-slate-500">· {titulo}</span></p>
+                {cabecalho}
+              </div>
+              <div className="no-print flex gap-2 shrink-0">
+                <button type="button" onClick={imprimir} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir / PDF</button>
+                <button type="button" onClick={onFechar} className="px-3 py-2 border border-slate-300 rounded-lg font-bold">Fechar</button>
+              </div>
+            </div>
+            {children}
+            <p className="text-[10px] text-slate-400 pt-2">Gerado pelo SIGO em {agora.toLocaleDateString('pt-BR')} às {agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.</p>
+          </div>
+        </div>,
+        document.getElementById('impressao'));
+    };
+    const BotaoImprimir = ({ onClick, children }) => (
+      <button type="button" onClick={onClick} className="px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100 flex items-center gap-2"><Icon name="print" className="w-4 h-4" /> {children}</button>
+    );
 
     // Gráfico de barras horizontais simples (sem biblioteca)
     const BarrasH = ({ itens, formato = (v) => v, vazio = 'Sem dados para exibir.' }) => {
@@ -511,6 +543,7 @@
       useEffect(() => {
         const g = grupoDaAba(activeTab);
         if (g) { setGruposAbertos(x => x[g] ? x : { ...x, [g]: true }); setGrupoMobile(g); }
+        setRel(null);
       }, [activeTab]);
       const [buscaEstoque, setBuscaEstoque] = useState('');
       const [filtroCategoria, setFiltroCategoria] = useState('');
@@ -537,6 +570,7 @@
       const [cotForm, setCotForm] = useState(null);
       const [nfForm, setNfForm] = useState(null);
       const [bdiEdit, setBdiEdit] = useState(null);
+      const [rel, setRel] = useState(null);   // documento aberto para impressão
       const [planSemana, setPlanSemana] = useState(() => segundaDe(hojeISO()));
       const [tarefaForm, setTarefaForm] = useState(null);
       const [causaForm, setCausaForm] = useState(null);       // importação do XML da NF-e
@@ -2435,6 +2469,7 @@
                                       </button>
                                     )}
                                     {c.status === 'Solicitado' && user.perfil === 'Engenheiro' && <BtnAcao onClick={() => aprovarCompra(c)}>Aprovar</BtnAcao>}
+                                    {c.fornecedorId && <BtnAcao onClick={() => setRel({ tipo: 'pedido', fornId: c.fornecedorId, obraId: c.obraId })}>Pedido</BtnAcao>}
                                     {can('compra.editar') && <BtnAcao onClick={() => abrirCompra(c)}>Editar</BtnAcao>}
                                     {can('compra.editar') && <BtnAcao perigo onClick={() => cancelarCompra(c)}>Cancelar</BtnAcao>}
                                   </>
@@ -2446,6 +2481,47 @@
                       </tbody>
                     </table>
                   </div>
+
+                  {rel?.tipo === 'pedido' && (() => {
+                    const forn = data.fornecedores.find(f => f.id === rel.fornId), ob = data.obras.find(o => o.id === rel.obraId);
+                    const itens = data.compras.filter(c => c.fornecedorId === rel.fornId && c.obraId === rel.obraId && (c.status === 'Comprado' || c.status === 'Solicitado'));
+                    const total = itens.reduce((t, c) => t + c.qtd * c.precoUnit, 0);
+                    const entregas = itens.map(c => c.entrega).filter(Boolean).sort();
+                    const numero = 'PC-' + hojeISO().replace(/-/g, '').slice(2) + '-' + (itens[0]?.id || '').slice(0, 4).toUpperCase();
+                    const fq = (v) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+                    const td = 'px-2 py-1.5 border border-slate-300', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
+                    const cnpj = (forn?.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+                    return (
+                      <RelImpresso titulo="Pedido de compra" onFechar={() => setRel(null)} cabecalho={<>
+                        <h3 className="text-xl font-extrabold mt-1">Pedido nº {numero}</h3>
+                        <p className="text-sm text-slate-600">Emitido em {fmtData(hojeISO())}{entregas[0] ? ` · entrega até ${fmtData(entregas[0])}` : ''}</p>
+                      </>}>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                          <div className="border border-slate-300 rounded p-3"><p className="text-[10px] font-bold uppercase text-slate-500">Fornecedor</p><p className="font-bold">{forn?.nome}</p>{cnpj && <p>CNPJ {cnpj}</p>}{forn?.contato && <p>{forn.contato}</p>}</div>
+                          <div className="border border-slate-300 rounded p-3"><p className="text-[10px] font-bold uppercase text-slate-500">Local de entrega</p><p className="font-bold">{ob?.nome}</p>{ob?.endereco && <p>{ob.endereco}</p>}{ob?.responsavel && <p>Receber com: {ob.responsavel}</p>}</div>
+                        </div>
+                        <table className="w-full text-left border-collapse">
+                          <thead><tr><th className={th}>Item</th><th className={th}>Código</th><th className={th}>Material</th><th className={th}>Un.</th><th className={th + ' text-right'}>Qtd</th><th className={th + ' text-right'}>Preço unit.</th><th className={th + ' text-right'}>Total</th><th className={th}>Entrega</th></tr></thead>
+                          <tbody>
+                            {itens.map((c, k) => { const m = getMat(c.materialId); return (
+                              <tr key={c.id}><td className={td}>{k + 1}</td><td className={td}>{m?.codigo}</td><td className={td + ' font-semibold'}>{m?.nome}</td><td className={td}>{m?.unidade}</td><td className={td + ' text-right'}>{fq(c.qtd)}</td><td className={td + ' text-right'}>{formatBRL(c.precoUnit)}</td><td className={td + ' text-right'}>{formatBRL(c.qtd * c.precoUnit)}</td><td className={td}>{c.entrega ? fmtData(c.entrega) : '—'}</td></tr>
+                            ); })}
+                            <tr className="font-bold"><td className={td} colSpan={6}>Total do pedido</td><td className={td + ' text-right'}>{formatBRL(total)}</td><td className={td} /></tr>
+                          </tbody>
+                        </table>
+                        <div className="text-[11px] text-slate-700 space-y-0.5">
+                          <p className="font-bold uppercase text-[10px] text-slate-500">Condições</p>
+                          <p>• Faturar com NF-e em nome da construtora, citando o nº deste pedido, e enviar o arquivo XML da nota junto com o DANFE.</p>
+                          <p>• Entregar no endereço acima, em horário comercial. Material fora da especificação ou da quantidade será devolvido.</p>
+                          <p>• Preços e quantidades conforme acima; alterações só com autorização por escrito.</p>
+                        </div>
+                        <div className="grid grid-cols-2 gap-10 pt-12 text-center text-slate-600">
+                          <div className="border-t border-slate-400 pt-1">Comprador / Engenheiro responsável</div>
+                          <div className="border-t border-slate-400 pt-1">Aceite do fornecedor</div>
+                        </div>
+                      </RelImpresso>
+                    );
+                  })()}
 
                   {can('nota.lancar') && (() => {
                     const notas = data.notas.filter(n => selectedObra === 'ALL' || n.obra_id === selectedObra);
@@ -2884,8 +2960,44 @@
                 const prods = data.producoes.filter(x => x.obra_id === consObraId && x.dia >= periodoConsumo[0] && x.dia <= periodoConsumo[1]);
                 const porServico = data.servicos.map(sv => ({ sv, q: prods.filter(x => x.servico_id === sv.id).reduce((s, x) => s + x.quantidade, 0) })).filter(x => x.q > 0);
                 const fmtQ = (q) => Number(q).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
+                const relConsumo = rel?.tipo === 'consumo' && (() => {
+                  const ob = data.obras.find(o => o.id === consObraId);
+                  const td = 'px-2 py-1.5 border border-slate-300', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
+                  return (
+                    <RelImpresso titulo="Consumo e perdas de material" onFechar={() => setRel(null)} cabecalho={<>
+                      <h3 className="text-xl font-extrabold mt-1">{ob?.nome}</h3>
+                      <p className="text-sm text-slate-600">Período de {fmtData(periodoConsumo[0])} a {fmtData(periodoConsumo[1])}</p>
+                    </>}>
+                      <div className={`grid ${eng ? 'grid-cols-3' : 'grid-cols-2'} gap-3 text-sm`}>
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">Materiais acima da tolerância</p><p className="font-extrabold text-lg">{acima.length}</p>{acima[0] && <p>maior: {acima[0].mat?.nome} (+{acima[0].pct.toFixed(1)}%)</p>}</div>
+                        {eng && <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">Custo da perda acima do previsto</p><p className="font-extrabold text-lg">{formatBRL(custoPerda)}</p><p>pelo último preço de compra</p></div>}
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">Produção no período</p><p>{porServico.length ? porServico.map(x => `${fmtQ(x.q)} ${x.sv.unidade} de ${x.sv.nome.replace(' (exemplo)', '')}`).join('; ') : 'nenhuma'}</p></div>
+                      </div>
+                      <table className="w-full text-left border-collapse">
+                        <thead><tr><th className={th}>Material</th><th className={th + ' text-right'}>Previsto</th><th className={th + ' text-right'}>Saiu do estoque</th><th className={th + ' text-right'}>Diferença</th><th className={th + ' text-right'}>Perda</th><th className={th + ' text-right'}>Tolerância</th>{eng && <th className={th + ' text-right'}>Custo</th>}<th className={th}>Situação</th></tr></thead>
+                        <tbody>
+                          {comPerda.map(l => { const ruim = l.pct !== null && l.pct > l.tolerancia; return (
+                            <tr key={l.material_id} className={ruim ? 'font-bold' : ''}>
+                              <td className={td}>{l.mat?.nome}</td><td className={td + ' text-right whitespace-nowrap'}>{fmtQ(l.previsto)} {l.mat?.unidade}</td><td className={td + ' text-right whitespace-nowrap'}>{fmtQ(l.realizado)} {l.mat?.unidade}</td>
+                              <td className={td + ' text-right'}>{l.realizado >= l.previsto ? '+' : '−'}{fmtQ(Math.abs(l.realizado - l.previsto))}</td>
+                              <td className={td + ' text-right'}>{l.pct === null ? '—' : `${l.pct > 0 ? '+' : ''}${l.pct.toFixed(1)}%`}</td><td className={td + ' text-right'}>{l.tolerancia}%</td>
+                              {eng && <td className={td + ' text-right'}>{l.custo > 0 ? formatBRL(l.custo) : '—'}</td>}
+                              <td className={td}>{l.pct === null ? 'Saiu sem produção lançada' : ruim ? 'ACIMA da tolerância' : l.pct < -10 ? 'Conferir lançamentos' : 'Dentro do esperado'}</td>
+                            </tr>
+                          ); })}
+                        </tbody>
+                      </table>
+                      <p className="text-[10px] text-slate-500">Previsto = produção lançada × índice de consumo de cada serviço. Perda acima da tolerância: verificar desperdício, traço, quebra no transporte ou desvio. Perda muito negativa costuma ser produção lançada a mais ou saída de material não registrada.</p>
+                      <div className="grid grid-cols-2 gap-10 pt-10 text-center text-slate-600">
+                        <div className="border-t border-slate-400 pt-1">Engenheiro responsável</div>
+                        <div className="border-t border-slate-400 pt-1">Almoxarife / Mestre de obras</div>
+                      </div>
+                    </RelImpresso>
+                  );
+                })();
                 return (
                   <div className="space-y-6">
+                    {relConsumo}
                     <div className="flex flex-wrap justify-between items-center gap-3">
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg">Consumo previsto x real</h3>
@@ -2896,6 +3008,7 @@
                         <select value={consPeriodo} onChange={e => setConsPeriodo(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" aria-label="Período">
                           <option value="obra">Desde o início da obra</option><option value="mes">Este mês</option><option value="mes_ant">Mês passado</option><option value="30d">Últimos 30 dias</option>
                         </select>
+                        {data.indices.length > 0 && <BotaoImprimir onClick={() => setRel({ tipo: 'consumo' })}>Relatório</BotaoImprimir>}
                         {eng && <button type="button" onClick={() => abrirServico(null)} className="px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100">Serviços e índices</button>}
                         {can('producao.lancar') && <button type="button" onClick={abrirProducao} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Lançar produção</button>}
                       </div>
@@ -2999,8 +3112,56 @@
                 // gráfico PPC
                 const W = 640, H = 200, L = 34, R = 10, T = 14, B = 30, bw = (W - L - R) / hist.length;
                 const y = (v) => T + (H - T - B) * (1 - v / 100);
+                const relPpc = rel?.tipo === 'ppc' && (() => {
+                  const ob = data.obras.find(o => o.id === obraId);
+                  const prox = daSemana(somaDiasDe(planSemana, 7));
+                  const histRel = Array.from({ length: 8 }, (_, i) => somaDiasDe(planSemana, -7 * (7 - i))).map(w => { const ts = daSemana(w); return { w, n: ts.length, ok: ts.filter(t => t.status === 'Concluída').length }; }).filter(h => h.n);
+                  const td = 'px-2 py-1.5 border border-slate-300', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
+                  return (
+                    <RelImpresso titulo="Planejamento semanal — relatório" onFechar={() => setRel(null)} cabecalho={<>
+                      <h3 className="text-xl font-extrabold mt-1">{ob?.nome}</h3>
+                      <p className="text-sm text-slate-600">Semana de {fmtData(planSemana)} a {fmtData(fimSem)}</p>
+                    </>}>
+                      <div className="grid grid-cols-3 gap-3 text-sm">
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">PPC da semana{fechada(planSemana) ? '' : ' (parcial)'}</p><p className="font-extrabold text-lg">{ppc === null ? '—' : ppc.toFixed(0) + '%'}</p><p>{feitas} de {tarefas.length} tarefas concluídas</p></div>
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">Média 4 semanas</p><p className="font-extrabold text-lg">{ppc4 === null ? '—' : ppc4.toFixed(0) + '%'}</p><p>meta: 80%</p></div>
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">Principal causa (12 sem.)</p><p className="font-extrabold text-lg">{causas[0]?.c || '—'}</p>{causas[0] && <p>{causas[0].n} de {totCausas} não cumpridas</p>}</div>
+                      </div>
+                      <table className="w-full text-left border-collapse">
+                        <thead><tr><th className={th}>Nº</th><th className={th}>Tarefa</th><th className={th}>Qtd</th><th className={th}>Responsável</th><th className={th}>Situação</th><th className={th}>Causa / observação</th></tr></thead>
+                        <tbody>
+                          {tarefas.map((t, k) => (
+                            <tr key={t.id}><td className={td}>{k + 1}</td><td className={td + ' font-semibold'}>{t.descricao}</td><td className={td + ' whitespace-nowrap'}>{t.quantidade !== null ? `${fq(t.quantidade)} ${t.unidade}` : ''}</td><td className={td}>{t.responsavel}</td>
+                              <td className={td + ' font-bold whitespace-nowrap'}>{t.status === 'Concluída' ? '✓ Concluída' : t.status === 'Não concluída' ? '✗ Não concluída' : '○ Em aberto'}</td><td className={td}>{t.causa ? `${t.causa}${t.obs ? ' — ' + t.obs : ''}` : ''}</td></tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <p className="font-bold uppercase text-[10px] text-slate-500 mb-1">PPC das semanas anteriores</p>
+                          <table className="w-full border-collapse"><thead><tr><th className={th}>Semana</th><th className={th + ' text-right'}>Planejadas</th><th className={th + ' text-right'}>Concluídas</th><th className={th + ' text-right'}>PPC</th></tr></thead>
+                            <tbody>{histRel.map(h => <tr key={h.w}><td className={td}>{fmtData(h.w)}</td><td className={td + ' text-right'}>{h.n}</td><td className={td + ' text-right'}>{h.ok}</td><td className={td + ' text-right font-bold'}>{(h.ok / h.n * 100).toFixed(0)}%</td></tr>)}</tbody></table>
+                        </div>
+                        <div>
+                          <p className="font-bold uppercase text-[10px] text-slate-500 mb-1">Causas de não cumprimento (12 semanas)</p>
+                          <table className="w-full border-collapse"><thead><tr><th className={th}>Causa</th><th className={th + ' text-right'}>Tarefas</th><th className={th + ' text-right'}>%</th></tr></thead>
+                            <tbody>{causas.map(x => <tr key={x.c}><td className={td}>{x.c}</td><td className={td + ' text-right'}>{x.n}</td><td className={td + ' text-right'}>{(x.n / totCausas * 100).toFixed(0)}%</td></tr>)}{!causas.length && <tr><td className={td} colSpan={3}>Nenhuma</td></tr>}</tbody></table>
+                        </div>
+                      </div>
+                      {prox.length > 0 && (<>
+                        <p className="font-bold uppercase text-[10px] text-slate-500">Planejado para a próxima semana ({fmtData(somaDiasDe(planSemana, 7)).slice(0, 5)} a {fmtData(somaDiasDe(planSemana, 12)).slice(0, 5)})</p>
+                        <table className="w-full border-collapse"><tbody>{prox.map((t, k) => <tr key={t.id}><td className={td + ' w-8'}>{k + 1}</td><td className={td + ' font-semibold'}>{t.descricao}</td><td className={td}>{t.quantidade !== null ? `${fq(t.quantidade)} ${t.unidade}` : ''}</td><td className={td}>{t.responsavel}</td></tr>)}</tbody></table>
+                      </>)}
+                      <div className="grid grid-cols-2 gap-10 pt-10 text-center text-slate-600">
+                        <div className="border-t border-slate-400 pt-1">Engenheiro responsável</div>
+                        <div className="border-t border-slate-400 pt-1">Mestre de obras</div>
+                      </div>
+                    </RelImpresso>
+                  );
+                })();
                 return (
                   <div className="space-y-6">
+                    {relPpc}
                     <div className="flex flex-wrap justify-between items-center gap-3">
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg">Planejamento semanal</h3>
@@ -3040,6 +3201,7 @@
                         </div>
                         {gerir && (
                           <div className="flex flex-wrap gap-2">
+                            {tarefas.length > 0 && <BotaoImprimir onClick={() => setRel({ tipo: 'ppc' })}>Relatório da semana</BotaoImprimir>}
                             {pendAnt > 0 && <button type="button" onClick={() => trazerPendentes(obraId)} className="border border-slate-300 hover:bg-slate-100 px-3 py-2 rounded-xl font-bold text-sm">Trazer {pendAnt} pendente{pendAnt > 1 ? 's' : ''} da semana anterior</button>}
                             <button type="button" onClick={() => abrirTarefa(null, obraId)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Tarefa</button>
                           </div>
@@ -3249,8 +3411,46 @@
                   const hs = data.avancoHist.filter(h => h.etapa_id === e.id && h.dia <= fimDoMes(m));
                   return s + vEt[e.id] * (hs.length ? hs[hs.length - 1].avanco : 0) / 100;
                 }, 0));
+                const relCrono = rel?.tipo === 'crono' && eng && (() => {
+                  const ob = data.obras.find(o => o.id === obraId), bdi = ob?.bdi_pct || 0, f = 1 + bdi / 100;
+                  const venda = orcado * f;
+                  const mesVenda = totPrev.map(v => v * f), acVenda = acum(mesVenda);
+                  const semData = etapas.filter(e => !(e.inicio && e.fim));
+                  const vk = (v) => v ? Math.round(v).toLocaleString('pt-BR') : '';
+                  const td = 'px-2 py-1.5 border border-slate-300', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
+                  return (
+                    <RelImpresso titulo="Cronograma físico-financeiro" paisagem onFechar={() => setRel(null)} cabecalho={<>
+                      <h3 className="text-xl font-extrabold mt-1">{ob?.nome}</h3>
+                      <p className="text-sm text-slate-600">{ob?.endereco ? ob.endereco + ' · ' : ''}{ini ? `${fmtData(ini)} a ${fmtData(fim)}` : ''}</p>
+                    </>}>
+                      <div className="grid grid-cols-3 gap-3 text-sm">
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">Custo direto</p><p className="font-bold">{formatBRL(orcado)}</p></div>
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">BDI</p><p className="font-bold">{bdi.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% · {formatBRL(venda - orcado)}</p></div>
+                        <div className="border border-slate-300 rounded p-2 bg-slate-50"><p className="text-[10px] font-bold uppercase text-slate-500">Preço total</p><p className="font-extrabold text-base">{formatBRL(venda)}</p></div>
+                      </div>
+                      <table className="w-full text-left border-collapse text-[10px]">
+                        <thead><tr><th className={th}>Etapa</th><th className={th + ' text-right'}>Valor (R$)</th><th className={th + ' text-right'}>%</th>{meses.map(m => <th key={m} className={th + ' text-right'}>{NOMES_MES[Number(m.slice(5)) - 1].slice(0, 3)}/{m.slice(2, 4)}</th>)}</tr></thead>
+                        <tbody>
+                          {etapas.map((e, k) => (
+                            <tr key={e.id}><td className={td + ' font-semibold'}>{k + 1}. {e.nome}</td><td className={td + ' text-right'}>{vk(vEt[e.id] * f)}</td><td className={td + ' text-right'}>{venda ? (vEt[e.id] * f / venda * 100).toFixed(1) : '0'}</td>
+                              {meses.map(m => <td key={m} className={td + ' text-right'}>{prevMes[e.id] ? vk((prevMes[e.id][m] || 0) * f) : ''}</td>)}</tr>
+                          ))}
+                          <tr className="font-bold bg-slate-50"><td className={td}>Total do mês</td><td className={td + ' text-right'}>{vk(venda)}</td><td className={td + ' text-right'}>100</td>{mesVenda.map((v, i) => <td key={i} className={td + ' text-right'}>{vk(v)}</td>)}</tr>
+                          <tr className="font-bold"><td className={td}>Acumulado</td><td className={td} /><td className={td} />{acVenda.map((v, i) => <td key={i} className={td + ' text-right'}>{vk(v)}</td>)}</tr>
+                          <tr className="font-bold"><td className={td}>% acumulado</td><td className={td} /><td className={td} />{acVenda.map((v, i) => <td key={i} className={td + ' text-right'}>{venda ? (v / venda * 100).toFixed(1) : ''}</td>)}</tr>
+                        </tbody>
+                      </table>
+                      <p className="text-[10px] text-slate-500">Valores com BDI de {bdi.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% incluído, distribuídos por mês proporcionalmente aos dias de cada etapa.{semData.length ? ` Etapas sem datas não entram na distribuição mensal: ${semData.map(e => e.nome).join(', ')}.` : ''}</p>
+                      <div className="grid grid-cols-2 gap-10 pt-10 text-center text-slate-600">
+                        <div className="border-t border-slate-400 pt-1">Engenheiro responsável</div>
+                        <div className="border-t border-slate-400 pt-1">Contratante</div>
+                      </div>
+                    </RelImpresso>
+                  );
+                })();
                 return (
                   <div className="space-y-6">
+                    {relCrono}
                     <div className="flex flex-wrap justify-between items-center gap-3">
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg">Orçamento e cronograma</h3>
@@ -3262,6 +3462,7 @@
                             {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                           </select>
                         )}
+                        {eng && obraId && etapas.length > 0 && <BotaoImprimir onClick={() => setRel({ tipo: 'crono' })}>Cronograma c/ BDI</BotaoImprimir>}
                         {eng && obraId && <button type="button" onClick={() => { setColarTexto(''); setColarModal(true); }} className="px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100">Colar do Excel</button>}
                         {eng && obraId && <button type="button" onClick={() => abrirEtapa(null, obraId)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Nova etapa</button>}
                       </div>
