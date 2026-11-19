@@ -30,7 +30,7 @@
   <style>
     @media print {
       body.imprimindo-ficha #root > div > *:not(.ficha-epi) { display: none !important; }
-      body.imprimindo-ficha .ficha-epi { position: static !important; background: white !important; padding: 0 !important; }
+      body.imprimindo-ficha .ficha-epi { position: static !important; background: white !important; padding: 0 !important; display: block !important; }
       body.imprimindo-ficha .ficha-epi > div { box-shadow: none !important; max-height: none !important; overflow: visible !important; border-radius: 0 !important; }
       body.imprimindo-rel #root { display: none !important; }
       body.imprimindo-rel .ficha-rel { position: static !important; background: white !important; padding: 0 !important; display: block !important; }
@@ -193,15 +193,84 @@
       );
     };
 
+    // Imprime com rodapé "Página X de Y" e data de geração (margens de página do Chrome/Edge)
+    const imprimirDoc = (cls) => {
+      const agora = new Date(), quando = agora.toLocaleDateString('pt-BR') + ' ' + agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const st = document.createElement('style');
+      st.textContent = `@media print { @page { margin: 10mm 10mm 14mm 10mm;
+        @bottom-left { content: "Gerado pelo SIGO em ${quando}"; font: 8px sans-serif; color: #64748b; }
+        @bottom-right { content: "Página " counter(page) " de " counter(pages); font: 8px sans-serif; color: #64748b; } } }`;
+      document.head.appendChild(st); document.body.classList.add(cls);
+      window.print();
+      document.body.classList.remove(cls); st.remove();
+    };
+
+    // Gera o PDF no próprio aparelho para enviar por WhatsApp / e-mail
+    let _html2pdf = null;
+    const carregarHtml2pdf = () => _html2pdf || (_html2pdf = new Promise((ok, falha) => {
+      if (window.html2pdf) return ok(window.html2pdf);
+      const sc = document.createElement('script'); sc.src = 'https://cdn.jsdelivr.net/npm/html2pdf.js@0.14.0/dist/html2pdf.bundle.min.js';
+      sc.onload = () => ok(window.html2pdf); sc.onerror = () => { _html2pdf = null; falha(new Error('Não foi possível carregar o gerador de PDF. Verifique a internet.')); };
+      document.head.appendChild(sc);
+    }));
+    const gerarPdfBlob = async (el, paisagem) => {
+      const h2p = await carregarHtml2pdf();
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll('.no-print').forEach(n => n.remove());
+      Object.assign(clone.style, { maxHeight: 'none', overflow: 'visible', width: 'auto', maxWidth: 'none', borderRadius: '0', boxShadow: 'none', padding: '0' });
+      return await h2p().set({
+        margin: [8, 8, 10, 8], filename: 'documento.pdf', image: { type: 'jpeg', quality: 0.92 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: '#ffffff' },
+        jsPDF: { unit: 'mm', format: 'a4', orientation: paisagem ? 'landscape' : 'portrait' },
+        pagebreak: { mode: ['css', 'legacy'], avoid: ['tr', 'figure', '.break-inside-avoid'] },
+      }).from(clone).outputPdf('blob');
+    };
+    const soDigitos = (t) => String(t || '').replace(/\D/g, '');
+    const foneWhats = (t) => { const d = soDigitos(t); if (d.length < 10) return ''; return d.length <= 11 ? '55' + d : d; };
+    const achaEmail = (t) => (String(t || '').match(/[\w.+-]+@[\w-]+\.[\w.]+/) || [''])[0];
+    const BotoesEnviar = ({ alvo, nomeArquivo, paisagem, para = {}, assunto, mensagem }) => {
+      const [gerando, setGerando] = useState('');
+      const baixar = (blob, nome) => { const u = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = u; a.download = nome; document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(u), 4000); };
+      const enviar = async (canal) => {
+        if (!alvo.current) return;
+        setGerando(canal);
+        try {
+          const nome = (nomeArquivo || 'documento').replace(/[\\/:*?"<>|]+/g, '-') + '.pdf';
+          const blob = await gerarPdfBlob(alvo.current, paisagem);
+          const arq = new File([blob], nome, { type: 'application/pdf' });
+          const texto = mensagem || assunto || nome;
+          if (canal === 'compartilhar' || (navigator.canShare && navigator.canShare({ files: [arq] }) && /Android|iPhone|iPad/i.test(navigator.userAgent))) {
+            if (navigator.canShare && navigator.canShare({ files: [arq] })) { await navigator.share({ files: [arq], title: assunto || nome, text: texto }); return; }
+          }
+          baixar(blob, nome);
+          if (canal === 'whatsapp') {
+            const f = foneWhats(para.telefone);
+            window.open(`https://wa.me/${f}?text=${encodeURIComponent(texto + '\n\n(PDF baixado: ' + nome + ' — anexe na conversa)')}`, '_blank');
+          } else if (canal === 'email') {
+            window.location.href = `mailto:${encodeURIComponent(para.email || '')}?subject=${encodeURIComponent(assunto || nome)}&body=${encodeURIComponent(texto + '\n\nSegue em anexo o arquivo ' + nome + '.')}`;
+          }
+        } catch (e) { if (e && e.name !== 'AbortError') alert(e.message || 'Não foi possível gerar o PDF.'); }
+        finally { setGerando(''); }
+      };
+      const b = 'flex items-center gap-1.5 px-3 py-2 border rounded-lg font-bold text-xs disabled:opacity-50';
+      return (<>
+        <button type="button" disabled={!!gerando} onClick={() => enviar('whatsapp')} className={b + ' border-emerald-300 text-emerald-800 hover:bg-emerald-50'} title={para.telefone ? `Enviar para ${para.telefone}` : 'Enviar por WhatsApp'}>{gerando === 'whatsapp' ? 'Gerando…' : 'WhatsApp'}</button>
+        <button type="button" disabled={!!gerando} onClick={() => enviar('email')} className={b + ' border-sky-300 text-sky-800 hover:bg-sky-50'} title={para.email ? `Enviar para ${para.email}` : 'Enviar por e-mail'}>{gerando === 'email' ? 'Gerando…' : 'E-mail'}</button>
+        <button type="button" disabled={!!gerando} onClick={() => enviar('baixar')} className={b + ' border-slate-300 hover:bg-slate-100'}>{gerando === 'baixar' ? 'Gerando…' : 'Baixar PDF'}</button>
+      </>);
+    };
+
     // Documento para imprimir / salvar em PDF (fica fora do app, para sair limpo na impressão)
-    const RelImpresso = ({ titulo, cabecalho, paisagem, onFechar, children }) => {
-      const imprimir = () => { document.body.classList.add('imprimindo-rel'); window.print(); document.body.classList.remove('imprimindo-rel'); };
+    const RelImpresso = ({ titulo, cabecalho, paisagem, onFechar, children, nomeArquivo, para, assunto, mensagem }) => {
+      const imprimir = () => imprimirDoc('imprimindo-rel');
+      const ref = useRef(null);
       const agora = new Date();
       return ReactDOM.createPortal(
         <div className="ficha-rel fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
           {paisagem && <style>{'@media print { @page { size: A4 landscape; margin: 10mm; } }'}</style>}
-          <div className="bg-white rounded-2xl max-w-5xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-xs text-slate-900">
-            <div className="no-print flex justify-end gap-2">
+          <div ref={ref} className="bg-white rounded-2xl max-w-5xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-xs text-slate-900">
+            <div className="no-print flex flex-wrap justify-end gap-2">
+              <BotoesEnviar alvo={ref} paisagem={paisagem} nomeArquivo={nomeArquivo || titulo} para={para} assunto={assunto || titulo} mensagem={mensagem} />
               <button type="button" onClick={imprimir} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir / PDF</button>
               <button type="button" onClick={onFechar} className="px-3 py-2 border border-slate-300 rounded-lg font-bold">Fechar</button>
             </div>
@@ -310,7 +379,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null, notas: [], notaItens: [], nfeMapas: [], tarefas: [], empresa: null };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null, notas: [], notaItens: [], nfeMapas: [], tarefas: [], empresa: null, pedidos: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -454,9 +523,10 @@
         eng ? sb.from('envios_alertas').select('*').order('dia', { ascending: false }).limit(1) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Almoxarife') ? sb.from('notas_fiscais').select('*').order('criado_em', { ascending: false }).limit(300) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Almoxarife') ? sb.from('nfe_mapeamentos').select('*') : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Almoxarife') ? sb.from('pedidos').select('*').order('numero', { ascending: false }).limit(2000) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Mestre de Obras') ? sb.from('tarefas_semana').select('*').order('semana', { ascending: false }).order('ordem', { ascending: true }).limit(5000) : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs, alertasDia, envios, notas, nfeMapas, tarefas] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs, alertasDia, envios, notas, nfeMapas, pedidos, tarefas] = (await Promise.all(consultas)).map(ok);
       const inspItens = inspecoes.length ? ok(await sb.from('inspecao_itens').select('*').in('inspecao_id', inspecoes.map(i => i.id)).order('ordem', { ascending: true })) : [];
       const notaItens = notas.length ? ok(await sb.from('nota_itens').select('*').in('nota_id', notas.map(n => n.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
@@ -475,7 +545,7 @@
         fornecedores: forns,
         compras: compras.map(c => ({
           id: c.id, obraId: c.obra_id, materialId: c.material_id, fornecedorId: c.fornecedor_id, qtd: num(c.qtd),
-          precoUnit: num(c.preco_unit), entrega: c.entrega, status: c.status, solicitante: c.solicitante, dataSolicitacao: c.data_solicitacao
+          precoUnit: num(c.preco_unit), entrega: c.entrega, status: c.status, solicitante: c.solicitante, dataSolicitacao: c.data_solicitacao, pedidoId: c.pedido_id || ''
         })),
         despesas: despesas.map(d => ({ id: d.id, compraId: d.compra_id, obraId: d.obra_id, etapaId: d.etapa_id || '', pagoEm: d.pago_em, descricao: d.descricao, categoria: d.categoria, valor: num(d.valor), vencimento: d.vencimento, status: d.status })),
         funcionarios: funcs.map(f => ({ id: f.id, nome: f.nome, funcao: f.funcao, obraId: f.obra_id, presenca: f.presenca })),
@@ -513,7 +583,7 @@
         notaItens: notaItens.map(i => ({ ...i, qtd_nf: num(i.qtd_nf), valor_unit: num(i.valor_unit), valor_total: num(i.valor_total), fator: num(i.fator), qtd_estoque: i.qtd_estoque === null ? null : num(i.qtd_estoque) })),
         nfeMapas,
         tarefas: tarefas.map(t => ({ ...t, quantidade: t.quantidade === null ? null : num(t.quantidade) })),
-        empresa,
+        empresa, pedidos,
       };
     }
 
@@ -599,6 +669,7 @@
       const [nfForm, setNfForm] = useState(null);
       const [bdiEdit, setBdiEdit] = useState(null);
       const [rel, setRel] = useState(null);   // documento aberto para impressão
+      const boletimRef = useRef(null);
       const [empForm, setEmpForm] = useState(null);
       const [relMensal, setRelMensal] = useState({ obraId: '', mes: '' });
       const [planSemana, setPlanSemana] = useState(() => segundaDe(hojeISO()));
@@ -1289,6 +1360,17 @@
         setRel({ tipo: 'mensal', obraId: o, mes: m, perdas: null });
         const { data: r } = await sb.rpc('analise_consumo', { p_obra: o, p_ini: m + '-01', p_fim: fim });
         setRel(x => x && x.tipo === 'mensal' ? { ...x, perdas: (r || []).map(l => ({ ...l, previsto: Number(l.previsto), realizado: Number(l.realizado), tolerancia: Number(l.tolerancia) })) } : x);
+      };
+
+      const numPedido = (p) => 'PC-' + String(p?.numero || 0).padStart(4, '0');
+      const abrirPedido = async (c) => {
+        if (c.pedidoId) { setRel({ tipo: 'pedido', pedidoId: c.pedidoId }); return; }
+        if (!can('compra.editar')) { alert('O pedido ainda não foi emitido.'); return; }
+        if (!confirm('Emitir o pedido de compra? Todos os itens em aberto deste fornecedor nesta obra entram no mesmo pedido, com número oficial.')) return;
+        setEnviando(true);
+        try { const id = ok(await sb.rpc('emitir_pedido', { p_obra: c.obraId, p_forn: c.fornecedorId })); await recarregar(); setRel({ tipo: 'pedido', pedidoId: id }); }
+        catch (err) { alert(err.message); }
+        finally { setEnviando(false); }
       };
 
       const salvarBdi = async (obraId) => {
@@ -2526,6 +2608,7 @@
                                 <span className={`px-2 py-0.5 rounded text-xs font-bold ${c.status === 'Entregue' ? 'bg-emerald-100 text-emerald-800' : c.status === 'Cancelado' ? 'bg-slate-200 text-slate-600' : c.status === 'Comprado' ? 'bg-sky-100 text-sky-800' : 'bg-amber-100 text-amber-800'}`}>
                                   {c.status === 'Comprado' ? 'Aprovado' : c.status}
                                 </span>
+                                {c.pedidoId && <button type="button" onClick={() => abrirPedido(c)} className="block text-[10px] font-bold text-slate-500 hover:underline mt-0.5">{numPedido(data.pedidos.find(p => p.id === c.pedidoId))}</button>}
                               </td>
                               <td className="px-6 py-3 whitespace-nowrap">
                                 {c.status !== 'Entregue' && c.status !== 'Cancelado' && (
@@ -2536,7 +2619,7 @@
                                       </button>
                                     )}
                                     {c.status === 'Solicitado' && user.perfil === 'Engenheiro' && <BtnAcao onClick={() => aprovarCompra(c)}>Aprovar</BtnAcao>}
-                                    {c.fornecedorId && <BtnAcao onClick={() => setRel({ tipo: 'pedido', fornId: c.fornecedorId, obraId: c.obraId })}>Pedido</BtnAcao>}
+                                    {c.fornecedorId && <BtnAcao onClick={() => abrirPedido(c)}>{c.pedidoId ? 'Ver pedido' : 'Emitir pedido'}</BtnAcao>}
                                     {can('compra.editar') && <BtnAcao onClick={() => abrirCompra(c)}>Editar</BtnAcao>}
                                     {can('compra.editar') && <BtnAcao perigo onClick={() => cancelarCompra(c)}>Cancelar</BtnAcao>}
                                   </>
@@ -2550,18 +2633,22 @@
                   </div>
 
                   {rel?.tipo === 'pedido' && (() => {
-                    const forn = data.fornecedores.find(f => f.id === rel.fornId), ob = data.obras.find(o => o.id === rel.obraId);
-                    const itens = data.compras.filter(c => c.fornecedorId === rel.fornId && c.obraId === rel.obraId && (c.status === 'Comprado' || c.status === 'Solicitado'));
-                    const total = itens.reduce((t, c) => t + c.qtd * c.precoUnit, 0);
+                    const ped = data.pedidos.find(p => p.id === rel.pedidoId); if (!ped) return null;
+                    const forn = data.fornecedores.find(f => f.id === ped.fornecedor_id), ob = data.obras.find(o => o.id === ped.obra_id);
+                    const itens = data.compras.filter(c => c.pedidoId === ped.id);
+                    const total = itens.filter(c => c.status !== 'Cancelado').reduce((t, c) => t + c.qtd * c.precoUnit, 0);
                     const entregas = itens.map(c => c.entrega).filter(Boolean).sort();
-                    const numero = 'PC-' + hojeISO().replace(/-/g, '').slice(2) + '-' + (itens[0]?.id || '').slice(0, 4).toUpperCase();
+                    const numero = numPedido(ped), canc = itens.length > 0 && itens.every(c => c.status === 'Cancelado');
                     const fq = (v) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
                     const td = 'px-2 py-1.5 border border-slate-300', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
                     const cnpj = (forn?.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
                     return (
-                      <RelImpresso titulo="Pedido de compra" onFechar={() => setRel(null)} cabecalho={<>
-                        <h3 className="text-xl font-extrabold mt-1">Pedido nº {numero}</h3>
-                        <p className="text-sm text-slate-600">Emitido em {fmtData(hojeISO())}{entregas[0] ? ` · entrega até ${fmtData(entregas[0])}` : ''}</p>
+                      <RelImpresso titulo="Pedido de compra" onFechar={() => setRel(null)} nomeArquivo={`Pedido ${numero} - ${forn?.nome || ''}`}
+                        para={{ telefone: forn?.contato, email: achaEmail(forn?.contato) }} assunto={`Pedido de compra ${numero} — ${data.empresa?.nome_fantasia || data.empresa?.razao_social || ''}`.replace(/ — $/, '')}
+                        mensagem={`Olá! Segue o pedido de compra ${numero} para entrega na obra ${ob?.nome || ''}. Total ${formatBRL(total)}. Por favor, confirme o recebimento e o prazo.`}
+                        cabecalho={<>
+                        <h3 className="text-xl font-extrabold mt-1">Pedido nº {numero}{canc ? ' — CANCELADO' : ''}</h3>
+                        <p className="text-sm text-slate-600">Emitido em {fmtData(isoLocal(new Date(ped.criado_em)))} por {ped.emitido_por}{entregas[0] ? ` · entrega até ${fmtData(entregas[0])}` : ''}</p>
                       </>}>
                         <div className="grid grid-cols-2 gap-4 text-sm">
                           <div className="border border-slate-300 rounded p-3"><p className="text-[10px] font-bold uppercase text-slate-500">Fornecedor</p><p className="font-bold">{forn?.nome}</p>{cnpj && <p>CNPJ {cnpj}</p>}{forn?.contato && <p>{forn.contato}</p>}</div>
@@ -2571,7 +2658,7 @@
                           <thead><tr><th className={th}>Item</th><th className={th}>Código</th><th className={th}>Material</th><th className={th}>Un.</th><th className={th + ' text-right'}>Qtd</th><th className={th + ' text-right'}>Preço unit.</th><th className={th + ' text-right'}>Total</th><th className={th}>Entrega</th></tr></thead>
                           <tbody>
                             {itens.map((c, k) => { const m = getMat(c.materialId); return (
-                              <tr key={c.id}><td className={td}>{k + 1}</td><td className={td}>{m?.codigo}</td><td className={td + ' font-semibold'}>{m?.nome}</td><td className={td}>{m?.unidade}</td><td className={td + ' text-right'}>{fq(c.qtd)}</td><td className={td + ' text-right'}>{formatBRL(c.precoUnit)}</td><td className={td + ' text-right'}>{formatBRL(c.qtd * c.precoUnit)}</td><td className={td}>{c.entrega ? fmtData(c.entrega) : '—'}</td></tr>
+                              <tr key={c.id} className={c.status === 'Cancelado' ? 'line-through text-slate-400' : ''}><td className={td}>{k + 1}</td><td className={td}>{m?.codigo}</td><td className={td + ' font-semibold'}>{m?.nome}{c.status === 'Entregue' ? ' (entregue)' : ''}</td><td className={td}>{m?.unidade}</td><td className={td + ' text-right'}>{fq(c.qtd)}</td><td className={td + ' text-right'}>{formatBRL(c.precoUnit)}</td><td className={td + ' text-right'}>{formatBRL(c.qtd * c.precoUnit)}</td><td className={td}>{c.entrega ? fmtData(c.entrega) : '—'}</td></tr>
                             ); })}
                             <tr className="font-bold"><td className={td} colSpan={6}>Total do pedido</td><td className={td + ' text-right'}>{formatBRL(total)}</td><td className={td} /></tr>
                           </tbody>
@@ -2889,7 +2976,7 @@
                 const alterado = !!diarioForm;
                 const relRdo = rel?.tipo === 'rdo' && (() => {
                   const ob = data.obras.find(o => o.id === obraDiarioId), d = diarioAtual;
-                  const nRdo = data.diarios.filter(x => x.obra_id === obraDiarioId && x.dia <= diarioDia).length + (d ? 0 : 1);
+                  const nRdo = d?.numero || (Math.max(0, ...data.diarios.filter(x => x.obra_id === obraDiarioId).map(x => x.numero || 0)) + 1);
                   const dt = new Date(diarioDia + 'T12:00:00');
                   const semana = dt.toLocaleDateString('pt-BR', { weekday: 'long' });
                   const decorridos = ob?.inicio ? diasEntre(ob.inicio, diarioDia) + 1 : null, prazo = ob?.inicio && ob?.previsao ? diasEntre(ob.inicio, ob.previsao) + 1 : null;
@@ -2901,7 +2988,9 @@
                   const bloco = (titulo, texto) => (<div><p className="font-bold uppercase text-[10px] text-slate-500 mb-1">{titulo}</p><div className="border border-slate-300 rounded p-2 min-h-[2.5rem] whitespace-pre-wrap text-[11px]">{texto || '—'}</div></div>);
                   const td = 'px-2 py-1.5 border border-slate-300 align-top', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold text-left';
                   return (
-                    <RelImpresso titulo="Relatório Diário de Obra (RDO)" onFechar={() => setRel(null)} cabecalho={<>
+                    <RelImpresso titulo="Relatório Diário de Obra (RDO)" onFechar={() => setRel(null)} nomeArquivo={`RDO ${String(nRdo).padStart(3, '0')} - ${ob?.nome || ''} - ${fmtData(diarioDia).replace(/\//g, '-')}`}
+                      assunto={`RDO nº ${String(nRdo).padStart(3, '0')} — ${ob?.nome || ''} — ${fmtData(diarioDia)}`} mensagem={`Segue o Relatório Diário de Obra nº ${String(nRdo).padStart(3, '0')} de ${fmtData(diarioDia)} — ${ob?.nome || ''}.`}
+                      cabecalho={<>
                       <div className="flex flex-wrap justify-between items-end gap-2">
                         <div><h3 className="text-xl font-extrabold">RDO nº {String(nRdo).padStart(3, '0')} — {fmtData(diarioDia)}</h3><p className="text-sm text-slate-600 capitalize">{semana}</p></div>
                         {!d && <p className="text-sm font-bold text-red-700">Diário ainda não registrado neste dia</p>}
@@ -3253,7 +3342,7 @@
                   const histRel = Array.from({ length: 8 }, (_, i) => somaDiasDe(planSemana, -7 * (7 - i))).map(w => { const ts = daSemana(w); return { w, n: ts.length, ok: ts.filter(t => t.status === 'Concluída').length }; }).filter(h => h.n);
                   const td = 'px-2 py-1.5 border border-slate-300', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
                   return (
-                    <RelImpresso titulo="Planejamento semanal — relatório" onFechar={() => setRel(null)} cabecalho={<>
+                    <RelImpresso titulo="Planejamento semanal — relatório" onFechar={() => setRel(null)} nomeArquivo={`PPC semana ${planSemana} - ${ob?.nome || ''}`} cabecalho={<>
                       <h3 className="text-xl font-extrabold mt-1">{ob?.nome}</h3>
                       <p className="text-sm text-slate-600">Semana de {fmtData(planSemana)} a {fmtData(fimSem)}</p>
                     </>}>
@@ -3546,6 +3635,50 @@
                   const hs = data.avancoHist.filter(h => h.etapa_id === e.id && h.dia <= fimDoMes(m));
                   return s + vEt[e.id] * (hs.length ? hs[hs.length - 1].avanco : 0) / 100;
                 }, 0));
+                const relAnalitico = rel?.tipo === 'analitico' && eng && (() => {
+                  const ob = data.obras.find(o => o.id === obraId), bdi = ob?.bdi_pct || 0, f = 1 + bdi / 100;
+                  const r2 = (v) => Math.round(v * 100) / 100;
+                  const td = 'px-2 py-1 border border-slate-300 align-top', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
+                  let totVenda = 0;
+                  const blocos = etapas.map((e, k) => {
+                    const its = data.etapaItens.filter(i => i.etapa_id === e.id).sort((a, b) => a.ordem - b.ordem);
+                    const linhas = its.map((i, j) => { const pu = r2(i.preco_unit * f), tot = r2(i.qtd * pu); return { i, cod: `${k + 1}.${j + 1}`, pu, tot }; });
+                    const sub = linhas.reduce((t, l) => t + l.tot, 0) || r2(vEt[e.id] * f); totVenda += sub;
+                    return { e, cod: String(k + 1), linhas, sub };
+                  });
+                  const fq = (v) => Number(v).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+                  const brl = (v) => Number(v).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                  return (
+                    <RelImpresso titulo="Orçamento analítico" onFechar={() => setRel(null)} nomeArquivo={`Orçamento - ${ob?.nome || ''}`} assunto={`Orçamento — ${ob?.nome || ''}`}
+                      mensagem={`Segue o orçamento da obra ${ob?.nome || ''}. Valor total: ${formatBRL(totVenda)}.`}
+                      cabecalho={<>
+                      <h3 className="text-xl font-extrabold mt-1">{ob?.nome}</h3>
+                      <p className="text-sm text-slate-600">{ob?.endereco}{ini ? ` · execução de ${fmtData(ini)} a ${fmtData(fim)}` : ''} · data-base {fmtData(hojeISO())}</p>
+                    </>}>
+                      <table className="w-full border-collapse text-[10px]">
+                        <thead><tr><th className={th + ' w-12 text-left'}>Item</th><th className={th + ' text-left'}>Descrição</th><th className={th + ' w-12'}>Un.</th><th className={th + ' w-20 text-right'}>Quant.</th><th className={th + ' w-24 text-right'}>Preço unit. (R$)</th><th className={th + ' w-28 text-right'}>Total (R$)</th><th className={th + ' w-14 text-right'}>%</th></tr></thead>
+                        <tbody>
+                          {blocos.map(b => (<React.Fragment key={b.e.id}>
+                            <tr className="bg-slate-100 font-bold"><td className={td}>{b.cod}</td><td className={td} colSpan={4}>{b.e.nome.toUpperCase()}</td><td className={td + ' text-right'}>{brl(b.sub)}</td><td className={td + ' text-right'}>{totVenda ? '' : ''}{(b.sub / (orcado * f || 1) * 100).toFixed(2)}</td></tr>
+                            {b.linhas.map(l => <tr key={l.i.id}><td className={td}>{l.cod}</td><td className={td}>{l.i.descricao}</td><td className={td + ' text-center'}>{l.i.unidade}</td><td className={td + ' text-right'}>{fq(l.i.qtd)}</td><td className={td + ' text-right'}>{brl(l.pu)}</td><td className={td + ' text-right'}>{brl(l.tot)}</td><td className={td} /></tr>)}
+                            {!b.linhas.length && <tr><td className={td} /><td className={td + ' italic text-slate-500'} colSpan={6}>Etapa sem itens detalhados (valor global).</td></tr>}
+                          </React.Fragment>))}
+                          <tr className="font-extrabold bg-slate-50 text-[11px]"><td className={td} colSpan={5}>VALOR TOTAL DA OBRA</td><td className={td + ' text-right'}>{brl(totVenda)}</td><td className={td + ' text-right'}>100,00</td></tr>
+                        </tbody>
+                      </table>
+                      <div className="grid grid-cols-3 gap-3 text-[11px]">
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">Custo direto</p><p className="font-bold">{formatBRL(orcado)}</p></div>
+                        <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">BDI ({bdi.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%)</p><p className="font-bold">{formatBRL(totVenda - orcado)}</p></div>
+                        <div className="border border-slate-300 rounded p-2 bg-slate-50"><p className="text-[10px] font-bold uppercase text-slate-500">Preço total</p><p className="font-extrabold">{formatBRL(totVenda)}</p></div>
+                      </div>
+                      <p className="text-[10px] text-slate-500">Preços unitários com BDI de {bdi.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}% incluído. Diferenças de centavos decorrem de arredondamento dos preços unitários.</p>
+                      <div className="grid grid-cols-2 gap-10 pt-10 text-center text-slate-600 text-[11px] break-inside-avoid">
+                        <div className="border-t border-slate-400 pt-1">Responsável técnico{data.empresa?.responsavel_tecnico ? <><br />{data.empresa.responsavel_tecnico}</> : ''}</div>
+                        <div className="border-t border-slate-400 pt-1">De acordo — Contratante</div>
+                      </div>
+                    </RelImpresso>
+                  );
+                })();
                 const relCrono = rel?.tipo === 'crono' && eng && (() => {
                   const ob = data.obras.find(o => o.id === obraId), bdi = ob?.bdi_pct || 0, f = 1 + bdi / 100;
                   const venda = orcado * f;
@@ -3554,7 +3687,7 @@
                   const vk = (v) => v ? Math.round(v).toLocaleString('pt-BR') : '';
                   const td = 'px-2 py-1.5 border border-slate-300', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold';
                   return (
-                    <RelImpresso titulo="Cronograma físico-financeiro" paisagem onFechar={() => setRel(null)} cabecalho={<>
+                    <RelImpresso titulo="Cronograma físico-financeiro" paisagem onFechar={() => setRel(null)} nomeArquivo={`Cronograma fisico-financeiro - ${ob?.nome || ''}`} cabecalho={<>
                       <h3 className="text-xl font-extrabold mt-1">{ob?.nome}</h3>
                       <p className="text-sm text-slate-600">{ob?.endereco ? ob.endereco + ' · ' : ''}{ini ? `${fmtData(ini)} a ${fmtData(fim)}` : ''}</p>
                     </>}>
@@ -3585,7 +3718,7 @@
                 })();
                 return (
                   <div className="space-y-6">
-                    {relCrono}
+                    {relCrono}{relAnalitico}
                     <div className="flex flex-wrap justify-between items-center gap-3">
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg">Orçamento e cronograma</h3>
@@ -3597,6 +3730,7 @@
                             {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                           </select>
                         )}
+                        {eng && obraId && etapas.length > 0 && <BotaoImprimir onClick={() => setRel({ tipo: 'analitico' })}>Orçamento analítico</BotaoImprimir>}
                         {eng && obraId && etapas.length > 0 && <BotaoImprimir onClick={() => setRel({ tipo: 'crono' })}>Cronograma c/ BDI</BotaoImprimir>}
                         {eng && obraId && <button type="button" onClick={() => { setColarTexto(''); setColarModal(true); }} className="px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100">Colar do Excel</button>}
                         {eng && obraId && <button type="button" onClick={() => abrirEtapa(null, obraId)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Nova etapa</button>}
@@ -4997,7 +5131,7 @@
             const kpi = (rot, val, sub) => <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">{rot}</p><p className="font-extrabold text-lg">{val}</p>{sub && <p className="text-[10px] text-slate-600">{sub}</p>}</div>;
             const sec = (t) => <p className="font-bold uppercase text-[10px] text-slate-500 pt-1">{t}</p>;
             return (
-              <RelImpresso titulo="Relatório mensal da obra" onFechar={() => setRel(null)} cabecalho={<>
+              <RelImpresso titulo="Relatório mensal da obra" onFechar={() => setRel(null)} nomeArquivo={`Relatorio mensal ${rel.mes} - ${ob.nome}`} mensagem={`Segue o relatório mensal da obra ${ob.nome} — ${capMes(rel.mes)}.`} cabecalho={<>
                 <h3 className="text-xl font-extrabold">{ob.nome} — {capMes(rel.mes)}</h3>
                 <p className="text-sm text-slate-600">{ob.endereco}{ob.art ? ` · ART ${ob.art}` : ''} · prazo {fmtData(ob.inicio)} a {fmtData(ob.previsao)}{fim < fimM ? ` · dados até ${fmtData(fim)}` : ''}</p>
               </>}>
@@ -5276,7 +5410,7 @@
 
           {inspVer && (() => {
             const i = data.inspecoes.find(x => x.id === inspVer); if (!i) return null;
-            const imprimir = () => { document.body.classList.add('imprimindo-ficha'); window.print(); document.body.classList.remove('imprimindo-ficha'); };
+            const imprimir = () => imprimirDoc('imprimindo-ficha');
             const td = 'p-2 border border-slate-300';
             const cor = { Conforme: 'text-emerald-700', 'Não conforme': 'text-red-700 font-bold', 'N/A': 'text-slate-500' };
             return (
@@ -5285,7 +5419,7 @@
                   <CabecalhoEmpresa />
                   <div className="flex justify-between items-start gap-4">
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{i.tipo === 'FVS' ? 'Ficha de verificação de serviço' : 'Ficha de verificação de material'}</p>
+                      <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{i.tipo === 'FVS' ? 'Ficha de verificação de serviço' : 'Ficha de verificação de material'}{i.numero ? ` · ${i.tipo} nº ${String(i.numero).padStart(3, '0')}` : ''}</p>
                       <h3 className="text-xl font-extrabold text-slate-900 mt-1">{i.nome}</h3>
                       <p className="text-slate-600">{getObraNome(i.obra_id)}{i.local ? ' · ' + i.local : ''} · {fmtData(i.dia)} · por {i.responsavel}</p>
                     </div>
@@ -5624,7 +5758,7 @@
             const compras = !aberta ? data.compras.filter(x => x.obraId === c.obra_id && c.aprovada_em) : [];
             const setPreco = (i, fo, v) => setMapa({ ...mapa, precos: { ...mapa.precos, [i.id + '|' + fo.id]: v } });
             const setForn = (fo, campo, v) => setMapa({ ...mapa, forns: { ...mapa.forns, [fo.id]: { ...mapa.forns[fo.id], [campo]: v } } });
-            const imprimir = () => { document.body.classList.add('imprimindo-ficha'); window.print(); document.body.classList.remove('imprimindo-ficha'); };
+            const imprimir = () => imprimirDoc('imprimindo-ficha');
             const td = 'px-3 py-2 border border-slate-200';
             return (
               <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
@@ -5911,11 +6045,11 @@
             const m = data.medicoes.find(x => x.id === boletim); if (!m) return null;
             const ct = data.contratos.find(x => x.id === m.contrato_id);
             const itens = itensDoContrato(ct.id);
-            const imprimir = () => { document.body.classList.add('imprimindo-ficha'); window.print(); document.body.classList.remove('imprimindo-ficha'); };
+            const imprimir = () => imprimirDoc('imprimindo-ficha');
             const td = 'p-1.5 border border-slate-300';
             return (
               <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
-                <div className="bg-white rounded-2xl max-w-4xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-xs">
+                <div ref={boletimRef} className="bg-white rounded-2xl max-w-4xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-xs">
                   <CabecalhoEmpresa />
                   <div className="flex justify-between items-start gap-4">
                     <div>
@@ -5923,7 +6057,9 @@
                       <h3 className="text-xl font-extrabold text-slate-900 mt-1">{ct.empreiteiro}</h3>
                       <p className="text-sm text-slate-600">{ct.objeto ? ct.objeto + ' · ' : ''}{getObraNome(ct.obra_id)} · período {fmtData(m.periodo_ini)} a {fmtData(m.periodo_fim)}</p>
                     </div>
-                    <div className="no-print flex gap-2">
+                    <div className="no-print flex flex-wrap justify-end gap-2">
+                      <BotoesEnviar alvo={boletimRef} paisagem nomeArquivo={`Boletim de medição ${m.numero} - ${ct.empreiteiro}`} para={{ telefone: ct.contato || '', email: achaEmail(ct.contato) }}
+                        assunto={`Boletim de medição nº ${m.numero} — ${ct.empreiteiro}`} mensagem={`Segue o boletim de medição nº ${m.numero} (${fmtData(m.periodo_ini)} a ${fmtData(m.periodo_fim)}). Valor a pagar: ${formatBRL(m.valor_liquido)}.`} />
                       <button type="button" onClick={imprimir} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
                       <button type="button" onClick={() => setBoletim(null)} className="px-3 py-2 border border-slate-300 rounded-lg font-bold">Fechar</button>
                     </div>
@@ -6003,7 +6139,7 @@
           {fichaEpi && (() => {
             const f = data.funcionarios.find(x => x.id === fichaEpi);
             const ents = data.epis.filter(e => e.funcionario_id === fichaEpi).slice().reverse();
-            const imprimir = () => { document.body.classList.add('imprimindo-ficha'); window.print(); document.body.classList.remove('imprimindo-ficha'); };
+            const imprimir = () => imprimirDoc('imprimindo-ficha');
             return (
               <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl max-w-3xl w-full p-8 space-y-5 max-h-[95vh] overflow-y-auto text-sm">
