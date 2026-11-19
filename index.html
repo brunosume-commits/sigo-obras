@@ -110,7 +110,7 @@
     const GRUPOS_MENU = [
       { id: 'canteiro', label: 'Canteiro', icon: 'building', abas: ['planejamento', 'diario', 'materiais', 'epi', 'qualidade', 'consumo', 'produtividade'] },
       { id: 'escritorio', label: 'Escritório', icon: 'briefcase', abas: ['obras', 'orcamento', 'compras', 'medicoes', 'financeiro', 'caixa', 'funcionarios', 'folha', 'documentos', 'relatorios'] },
-      { id: 'admin', label: 'Administração', icon: 'settings', abas: ['portal', 'usuarios'] },
+      { id: 'admin', label: 'Administração', icon: 'settings', abas: ['empresa', 'portal', 'usuarios'] },
     ];
     const grupoDaAba = (id) => GRUPOS_MENU.find(g => g.abas.includes(id))?.id || null;
     const somaDiasDe = (iso, dias) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + dias); return isoLocal(d); };
@@ -165,6 +165,34 @@
     const mesmaUnidade = (a, b) => { const n = (u) => { const x = semAcento(u).replace(/[^a-z0-9²³]/g, ''); return UNID_EQUIV[x] || x; }; return n(a) === n(b); };
     const fmtChave = (c) => String(c || '').replace(/(\d{4})(?=\d)/g, '$1 ');
 
+    // Dados da construtora para o cabeçalho de todos os documentos
+    const EmpresaCtx = React.createContext(null);
+    const fmtCnpj = (c) => String(c || '').replace(/\D/g, '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    const CabecalhoEmpresa = ({ titulo, direita }) => {
+      const e = React.useContext(EmpresaCtx) || {};
+      const nome = e.razao_social || e.nome_fantasia;
+      const linha2 = [e.cnpj && `CNPJ ${fmtCnpj(e.cnpj)}`, e.registro_crea && `CREA ${e.registro_crea}`].filter(Boolean).join(' · ');
+      const linha3 = [e.endereco, e.cidade_uf].filter(Boolean).join(' — ');
+      const linha4 = [e.telefone, e.email, e.site].filter(Boolean).join(' · ');
+      return (
+        <div className="flex justify-between items-start gap-4 border-b-2 border-slate-900 pb-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {e.logo && <img src={e.logo} alt="" className="h-14 w-auto max-w-[150px] object-contain shrink-0" />}
+            <div className="min-w-0">
+              <p className="font-extrabold text-sm text-slate-900">{nome || 'SIGO — Gestão de Obras'}</p>
+              {linha2 && <p className="text-[10px] text-slate-600">{linha2}</p>}
+              {linha3 && <p className="text-[10px] text-slate-600">{linha3}</p>}
+              {linha4 && <p className="text-[10px] text-slate-600">{linha4}</p>}
+            </div>
+          </div>
+          <div className="text-right shrink-0">
+            {titulo && <p className="font-bold uppercase tracking-wider text-[10px] text-slate-500">{titulo}</p>}
+            {direita}
+          </div>
+        </div>
+      );
+    };
+
     // Documento para imprimir / salvar em PDF (fica fora do app, para sair limpo na impressão)
     const RelImpresso = ({ titulo, cabecalho, paisagem, onFechar, children }) => {
       const imprimir = () => { document.body.classList.add('imprimindo-rel'); window.print(); document.body.classList.remove('imprimindo-rel'); };
@@ -173,16 +201,12 @@
         <div className="ficha-rel fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
           {paisagem && <style>{'@media print { @page { size: A4 landscape; margin: 10mm; } }'}</style>}
           <div className="bg-white rounded-2xl max-w-5xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-xs text-slate-900">
-            <div className="flex justify-between items-start gap-4 border-b-2 border-slate-900 pb-3">
-              <div>
-                <p className="font-black text-sm tracking-tight">SIGO <span className="font-semibold text-slate-500">· {titulo}</span></p>
-                {cabecalho}
-              </div>
-              <div className="no-print flex gap-2 shrink-0">
-                <button type="button" onClick={imprimir} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir / PDF</button>
-                <button type="button" onClick={onFechar} className="px-3 py-2 border border-slate-300 rounded-lg font-bold">Fechar</button>
-              </div>
+            <div className="no-print flex justify-end gap-2">
+              <button type="button" onClick={imprimir} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir / PDF</button>
+              <button type="button" onClick={onFechar} className="px-3 py-2 border border-slate-300 rounded-lg font-bold">Fechar</button>
             </div>
+            <CabecalhoEmpresa titulo={titulo} />
+            {cabecalho && <div>{cabecalho}</div>}
             {children}
             <p className="text-[10px] text-slate-400 pt-2">Gerado pelo SIGO em {agora.toLocaleDateString('pt-BR')} às {agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}.</p>
           </div>
@@ -220,6 +244,7 @@
     };
 
     const rotuloMes = (mes) => `${NOMES_MES[Number(mes.slice(5, 7)) - 1]} de ${mes.slice(0, 4)}`;
+    const capMes = (mes) => { const r = rotuloMes(mes); return r.charAt(0).toUpperCase() + r.slice(1); };
     const somaMes = (mes, delta) => { const [a, m] = mes.split('-').map(Number); const d = new Date(a, m - 1 + delta, 1); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`; };
     // Mesma regra do banco (fechar_folha): diária x presenças; mensal - (salário/30 x faltas)
     const calcularPagamento = (rem, cont) => {
@@ -261,7 +286,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'planejamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'empresa', 'obras', 'orcamento', 'planejamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -285,7 +310,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null, notas: [], notaItens: [], nfeMapas: [], tarefas: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null, notas: [], notaItens: [], nfeMapas: [], tarefas: [], empresa: null };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -377,7 +402,9 @@
     };
 
     async function carregarDados(perfil, mesPresenca, mesFolha, diaDiario) {
-      if (perfil === 'Cliente') return { ...DADOS_VAZIOS, portal: ok(await sb.rpc('portal_cliente', {})) || [] };
+      const empresaQ = await sb.from('empresa').select('*').eq('id', 1);
+      const empresa = empresaQ.error ? null : (empresaQ.data || [])[0] || null;
+      if (perfil === 'Cliente') return { ...DADOS_VAZIOS, empresa, portal: ok(await sb.rpc('portal_cliente', {})) || [] };
       const eng = perfil === 'Engenheiro';
       const iniF = mesFolha + '-01', fimF = mesFolha + '-' + pad2(diasDoMes(mesFolha));
       const iniMes = mesPresenca + '-01';
@@ -486,6 +513,7 @@
         notaItens: notaItens.map(i => ({ ...i, qtd_nf: num(i.qtd_nf), valor_unit: num(i.valor_unit), valor_total: num(i.valor_total), fator: num(i.fator), qtd_estoque: i.qtd_estoque === null ? null : num(i.qtd_estoque) })),
         nfeMapas,
         tarefas: tarefas.map(t => ({ ...t, quantidade: t.quantidade === null ? null : num(t.quantidade) })),
+        empresa,
       };
     }
 
@@ -571,6 +599,8 @@
       const [nfForm, setNfForm] = useState(null);
       const [bdiEdit, setBdiEdit] = useState(null);
       const [rel, setRel] = useState(null);   // documento aberto para impressão
+      const [empForm, setEmpForm] = useState(null);
+      const [relMensal, setRelMensal] = useState({ obraId: '', mes: '' });
       const [planSemana, setPlanSemana] = useState(() => segundaDe(hojeISO()));
       const [tarefaForm, setTarefaForm] = useState(null);
       const [causaForm, setCausaForm] = useState(null);       // importação do XML da NF-e
@@ -874,7 +904,7 @@
         e.preventDefault();
         if (novaObraForm.previsao < novaObraForm.inicio) return alert('A previsão de término não pode ser anterior ao início.');
         const { nome, endereco, responsavel, inicio, previsao, status } = novaObraForm;
-        const reg = { nome, endereco, responsavel, inicio, previsao, status, orcamento: Number(novaObraForm.orcamento) };
+        const reg = { nome, endereco, responsavel, inicio, previsao, status, orcamento: Number(novaObraForm.orcamento), art: (novaObraForm.art || '').trim() };
         if (await executar(async () => ok(novaObraForm.id
           ? await sb.from('obras').update(reg).eq('id', novaObraForm.id)
           : await sb.from('obras').insert(reg)))) setNovaObraModal(false);
@@ -1226,6 +1256,41 @@
             forns: data.cotacaoForns.filter(f => f.cotacao_id === c.id).map(f => f.fornecedor_id) }
           : { obraId: primeiraObra(), titulo: '', obs: '', itens: [{ materialId: data.materiais[0]?.id || '', qtd: '' }], forns: data.fornecedores.slice(0, 3).map(f => f.id) });
       };
+      // ---------- Dados da construtora ----------
+      const CAMPOS_EMPRESA = ['razao_social', 'nome_fantasia', 'cnpj', 'endereco', 'cidade_uf', 'telefone', 'email', 'site', 'responsavel_tecnico', 'registro_crea', 'logo'];
+      const formEmpresa = empForm || Object.fromEntries(CAMPOS_EMPRESA.map(c => [c, data.empresa?.[c] || '']));
+      const mudarEmpresa = (c, v) => setEmpForm({ ...formEmpresa, [c]: v });
+      const lerLogo = (arq) => {
+        if (!arq) return;
+        if (!/^image\//.test(arq.type)) { alert('Escolha uma imagem (PNG ou JPG).'); return; }
+        const img = new Image(), url = URL.createObjectURL(arq);
+        img.onload = () => {
+          const k = Math.min(1, 360 / Math.max(img.width, img.height)), c = document.createElement('canvas');
+          c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+          c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+          let d = c.toDataURL('image/png'); if (d.length > 380000) d = c.toDataURL('image/jpeg', 0.85);
+          URL.revokeObjectURL(url); mudarEmpresa('logo', d);
+        };
+        img.onerror = () => { URL.revokeObjectURL(url); alert('Não foi possível ler a imagem.'); };
+        img.src = url;
+      };
+      const salvarEmpresa = async (ev) => {
+        ev.preventDefault();
+        const reg = Object.fromEntries(CAMPOS_EMPRESA.map(c => [c, c === 'logo' ? formEmpresa.logo : String(formEmpresa[c] || '').trim()]));
+        reg.cnpj = reg.cnpj.replace(/\D/g, '');
+        if (reg.cnpj && reg.cnpj.length !== 14) { alert('O CNPJ precisa ter 14 dígitos.'); return; }
+        if (await executar(async () => ok(await sb.from('empresa').update({ ...reg, atualizado_em: new Date().toISOString() }).eq('id', 1)))) setEmpForm(null);
+      };
+      const gerarMensal = async () => {
+        const { obraId, mes } = relMensal;
+        const o = obraId || data.obras[0]?.id, m = mes || hojeISO().slice(0, 7);
+        if (!o) return;
+        const fim = fimDoMes(m) < hojeISO() ? fimDoMes(m) : hojeISO();
+        setRel({ tipo: 'mensal', obraId: o, mes: m, perdas: null });
+        const { data: r } = await sb.rpc('analise_consumo', { p_obra: o, p_ini: m + '-01', p_fim: fim });
+        setRel(x => x && x.tipo === 'mensal' ? { ...x, perdas: (r || []).map(l => ({ ...l, previsto: Number(l.previsto), realizado: Number(l.realizado), tolerancia: Number(l.tolerancia) })) } : x);
+      };
+
       const salvarBdi = async (obraId) => {
         const v = numBR(bdiEdit);
         if (!(v >= 0 && v <= 100)) { alert('Informe o BDI entre 0 e 100%.'); return; }
@@ -1838,6 +1903,7 @@
         { id: 'folha', label: 'Folha de Pagamento', icon: 'wallet' },
         { id: 'relatorios', label: 'Relatórios', icon: 'file' },
         { id: 'portal', label: user?.perfil === 'Cliente' ? 'Minha obra' : 'Portal do Cliente', icon: 'eye' },
+        { id: 'empresa', label: 'Dados da Construtora', icon: 'briefcase', badge: data.empresa && !data.empresa.razao_social ? '!' : null },
         { id: 'usuarios', label: 'Usuários', icon: 'users', badge: data.perfis.filter(p => !p.ativo).length || null },
       ].filter(item => podeVerAba(item.id));
 
@@ -1883,6 +1949,7 @@
       const totalMateriaisGasto = despesasVisiveis.filter(d => d.categoria === 'Material').reduce((acc, d) => acc + Number(d.valor), 0);
 
       return (
+        <EmpresaCtx.Provider value={data.empresa}>
         <div className="min-h-screen flex flex-col md:flex-row">
           <aside className="no-print w-full md:w-64 bg-slate-900 text-slate-200 flex flex-col shrink-0">
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
@@ -2764,7 +2831,7 @@
                       <div className="no-print flex items-center gap-2">
                         <button type="button" onClick={() => mudarMes(-1)} title="Mês anterior" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100"><Icon name="chevronLeft" className="w-4 h-4" /></button>
                         <button type="button" onClick={() => mudarMes(1)} disabled={mesPresenca >= hoje.slice(0, 7)} title="Próximo mês" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-30"><Icon name="chevronRight" className="w-4 h-4" /></button>
-                        <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir folha</button>
+                        <button type="button" onClick={() => setRel({ tipo: 'presenca' })} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir folha</button>
                       </div>
                     </div>
                     <div className="overflow-x-auto">
@@ -2820,9 +2887,77 @@
                   (m.obraId === obraDiarioId || m.obraDestinoId === obraDiarioId));
                 const historico = data.diarios.filter(d => d.obra_id === obraDiarioId).slice(0, 30);
                 const alterado = !!diarioForm;
+                const relRdo = rel?.tipo === 'rdo' && (() => {
+                  const ob = data.obras.find(o => o.id === obraDiarioId), d = diarioAtual;
+                  const nRdo = data.diarios.filter(x => x.obra_id === obraDiarioId && x.dia <= diarioDia).length + (d ? 0 : 1);
+                  const dt = new Date(diarioDia + 'T12:00:00');
+                  const semana = dt.toLocaleDateString('pt-BR', { weekday: 'long' });
+                  const decorridos = ob?.inicio ? diasEntre(ob.inicio, diarioDia) + 1 : null, prazo = ob?.inicio && ob?.previsao ? diasEntre(ob.inicio, ob.previsao) + 1 : null;
+                  const porFuncao = {}; funcsObra.filter(f => presDia[f.id] === 'Presente').forEach(f => { (porFuncao[f.funcao || 'Outros'] = porFuncao[f.funcao || 'Outros'] || []).push(f.nome); });
+                  const prodsDia = data.producoes.filter(x => x.obra_id === obraDiarioId && x.dia === diarioDia);
+                  const fotos = d?.fotos || [];
+                  const emp = data.empresa || {};
+                  const pratic = (c) => c === 'Impraticável' ? 'Impraticável' : 'Praticável';
+                  const bloco = (titulo, texto) => (<div><p className="font-bold uppercase text-[10px] text-slate-500 mb-1">{titulo}</p><div className="border border-slate-300 rounded p-2 min-h-[2.5rem] whitespace-pre-wrap text-[11px]">{texto || '—'}</div></div>);
+                  const td = 'px-2 py-1.5 border border-slate-300 align-top', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold text-left';
+                  return (
+                    <RelImpresso titulo="Relatório Diário de Obra (RDO)" onFechar={() => setRel(null)} cabecalho={<>
+                      <div className="flex flex-wrap justify-between items-end gap-2">
+                        <div><h3 className="text-xl font-extrabold">RDO nº {String(nRdo).padStart(3, '0')} — {fmtData(diarioDia)}</h3><p className="text-sm text-slate-600 capitalize">{semana}</p></div>
+                        {!d && <p className="text-sm font-bold text-red-700">Diário ainda não registrado neste dia</p>}
+                      </div>
+                    </>}>
+                      <table className="w-full border-collapse text-[11px]"><tbody>
+                        <tr><td className={th}>Obra</td><td className={td + ' font-bold'} colSpan={3}>{ob?.nome}</td></tr>
+                        <tr><td className={th}>Endereço</td><td className={td} colSpan={3}>{ob?.endereco || '—'}</td></tr>
+                        <tr><td className={th}>ART / RRT</td><td className={td}>{ob?.art || '—'}</td><td className={th}>Responsável técnico</td><td className={td}>{emp.responsavel_tecnico || ob?.responsavel || '—'}</td></tr>
+                        <tr><td className={th}>Prazo</td><td className={td}>{ob?.inicio ? `${fmtData(ob.inicio)} a ${fmtData(ob.previsao)}` : '—'}</td><td className={th}>Dias decorridos</td><td className={td}>{decorridos !== null ? `${decorridos} de ${prazo}${decorridos > prazo ? ' (prazo vencido)' : ` · faltam ${prazo - decorridos}`}` : '—'}</td></tr>
+                      </tbody></table>
+                      <div className="grid grid-cols-2 gap-3">
+                        <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th}>Clima</th><th className={th}>Tempo</th><th className={th}>Condição</th></tr></thead><tbody>
+                          <tr><td className={td}>Manhã</td><td className={td}>{d?.clima_manha || '—'}</td><td className={td}>{d ? pratic(d.clima_manha) : '—'}</td></tr>
+                          <tr><td className={td}>Tarde</td><td className={td}>{d?.clima_tarde || '—'}</td><td className={td}>{d ? pratic(d.clima_tarde) : '—'}</td></tr>
+                        </tbody></table>
+                        <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th}>Efetivo</th><th className={th + ' text-right'}>Qtd</th></tr></thead><tbody>
+                          <tr><td className={td}>Presentes</td><td className={td + ' text-right font-bold'}>{cont.Presente.length}</td></tr>
+                          <tr><td className={td}>Faltas / atestados</td><td className={td + ' text-right'}>{cont.Falta.length} / {cont.Atestado.length}</td></tr>
+                        </tbody></table>
+                      </div>
+                      <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th + ' w-40'}>Função</th><th className={th + ' w-12 text-right'}>Qtd</th><th className={th}>Nomes</th></tr></thead><tbody>
+                        {Object.entries(porFuncao).sort().map(([fn, ns]) => <tr key={fn}><td className={td}>{fn}</td><td className={td + ' text-right'}>{ns.length}</td><td className={td}>{ns.join(', ')}</td></tr>)}
+                        {!Object.keys(porFuncao).length && <tr><td className={td} colSpan={3}>Sem presença registrada.</td></tr>}
+                        {(cont.Falta.length > 0 || cont.Atestado.length > 0) && <tr><td className={td}>Ausentes</td><td className={td + ' text-right'}>{cont.Falta.length + cont.Atestado.length}</td><td className={td}>{[...cont.Falta.map(n => n + ' (falta)'), ...cont.Atestado.map(n => n + ' (atestado)')].join(', ')}</td></tr>}
+                      </tbody></table>
+                      {bloco('Serviços executados', d?.servicos)}
+                      {prodsDia.length > 0 && (
+                        <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th}>Produção medida</th><th className={th + ' text-right'}>Quantidade</th><th className={th}>Local</th><th className={th}>Equipe</th></tr></thead><tbody>
+                          {prodsDia.map(x => { const sv = data.servicos.find(v => v.id === x.servico_id); return <tr key={x.id}><td className={td}>{sv?.nome.replace(' (exemplo)', '')}</td><td className={td + ' text-right'}>{x.quantidade.toLocaleString('pt-BR')} {sv?.unidade}</td><td className={td}>{x.local}</td><td className={td}>{x.equipe}</td></tr>; })}
+                        </tbody></table>
+                      )}
+                      {bloco('Ocorrências / problemas', d?.ocorrencias)}
+                      {movsDia.length > 0 && (
+                        <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th}>Materiais</th><th className={th}>Movimento</th><th className={th + ' text-right'}>Quantidade</th><th className={th}>Obs.</th></tr></thead><tbody>
+                          {movsDia.map(m => { const mt = getMat(m.materialId); return <tr key={m.id}><td className={td}>{mt?.nome}</td><td className={td}>{m.tipo === 'Entrada' ? 'Recebido' : m.tipo === 'Saída' ? 'Aplicado' : m.tipo}</td><td className={td + ' text-right'}>{m.qtd.toLocaleString('pt-BR')} {mt?.unidade}</td><td className={td}>{m.obs !== '-' ? m.obs : ''}</td></tr>; })}
+                        </tbody></table>
+                      )}
+                      {bloco('Observações / orientações', d?.observacoes)}
+                      {fotos.length > 0 && (<div>
+                        <p className="font-bold uppercase text-[10px] text-slate-500 mb-1">Registro fotográfico</p>
+                        <div className="grid grid-cols-3 gap-2">{fotos.map(f => <figure key={f.id} className="border border-slate-300 rounded p-1 break-inside-avoid">{fotoUrls[f.caminho] ? <img src={fotoUrls[f.caminho]} alt="" className="w-full h-40 object-cover" /> : <div className="h-40 bg-slate-100" />}<figcaption className="text-[10px] text-slate-600 mt-0.5">{f.legenda || fmtData(diarioDia)}</figcaption></figure>)}</div>
+                      </div>)}
+                      <p className="text-[10px] text-slate-500">{d ? `Registrado por ${d.autor_nome || '—'}; última alteração em ${fmtData(tsLocal(d.atualizado_em))}.` : ''}</p>
+                      <div className="grid grid-cols-3 gap-8 pt-8 text-center text-slate-600 text-[11px] break-inside-avoid">
+                        <div className="border-t border-slate-400 pt-1">Responsável técnico{emp.responsavel_tecnico ? <><br />{emp.responsavel_tecnico}</> : ''}</div>
+                        <div className="border-t border-slate-400 pt-1">Mestre de obras</div>
+                        <div className="border-t border-slate-400 pt-1">Fiscalização / Contratante</div>
+                      </div>
+                    </RelImpresso>
+                  );
+                })();
                 const ta = 'w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 disabled:bg-slate-50';
                 return (
                   <div className="space-y-6">
+                    {relRdo}
                     <div className="flex flex-wrap items-end justify-between gap-3">
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg">Diário de Obra (RDO) — {getObraNome(obraDiarioId)} · {fmtData(diarioDia)}</h3>
@@ -2841,7 +2976,7 @@
                         <input type="date" value={diarioDia} max={hoje} onChange={e => e.target.value && e.target.value <= hoje && setDiarioDia(e.target.value)}
                           className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-semibold" />
                         {diarioDia !== hoje && <button type="button" onClick={() => setDiarioDia(hoje)} className="text-xs font-bold text-amber-700 hover:underline">Hoje</button>}
-                        <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
+                        <button type="button" onClick={() => setRel({ tipo: 'rdo' })} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
                       </div>
                     </div>
 
@@ -4181,8 +4316,36 @@
                 const porObra = Object.entries(itens.reduce((acc, i) => { acc[i.obraId] = (acc[i.obraId] || 0) + i.total; return acc; }, {}));
                 const mesAtual = mesFolha === hoje.slice(0, 7);
                 const setAj = (fid, campo, v) => setAjustesFolha(prev => ({ ...prev, [fid]: { ...prev[fid], [campo]: v } }));
+                const relFolha = rel?.tipo === 'folha' && (() => {
+                  const td = 'px-2 py-1.5 border border-slate-300 align-top', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold text-left';
+                  return (
+                    <RelImpresso titulo="Folha de pagamento" paisagem onFechar={() => setRel(null)} cabecalho={<>
+                      <h3 className="text-xl font-extrabold">{capMes(mesFolha)}</h3>
+                      <p className="text-sm text-slate-600">{fechada ? `Fechada em ${fmtData(tsLocal(fechada.fechada_em))}` : 'PRÉVIA — folha ainda aberta'}{selectedObra !== 'ALL' ? ` · somente ${getObraNome(selectedObra)}` : ''}</p>
+                    </>}>
+                      <table className="w-full border-collapse text-[11px]">
+                        <thead><tr><th className={th}>Funcionário</th><th className={th}>Função</th><th className={th}>Obra</th><th className={th}>Recebe por</th><th className={th + ' text-center'}>P</th><th className={th + ' text-center'}>F</th><th className={th + ' text-center'}>A</th><th className={th + ' text-right'}>Calculado</th><th className={th + ' text-right'}>Ajuste</th><th className={th + ' text-right'}>Total</th><th className={th + ' w-48'}>Recebi (assinatura)</th></tr></thead>
+                        <tbody>
+                          {itens.map(i => (
+                            <tr key={i.fid}><td className={td + ' font-semibold'}>{i.nome}</td><td className={td}>{i.funcao}</td><td className={td}>{getObraNome(i.obraId)}</td><td className={td + ' whitespace-nowrap'}>{i.tipo === 'Diária' ? 'Diária' : 'Mês'} {formatBRL(i.base)}</td>
+                              <td className={td + ' text-center'}>{i.P}</td><td className={td + ' text-center'}>{i.F}</td><td className={td + ' text-center'}>{i.A}</td><td className={td + ' text-right'}>{formatBRL(i.calc)}</td>
+                              <td className={td + ' text-right'}>{i.ajuste ? formatBRL(i.ajuste) : ''}{i.obs ? <span className="block text-[9px] text-slate-500">{i.obs}</span> : ''}</td><td className={td + ' text-right font-bold'}>{formatBRL(i.total)}</td><td className={td} /></tr>
+                          ))}
+                          {porObra.length > 1 && porObra.map(([oid, v]) => <tr key={oid}><td className={td} colSpan={9}>Subtotal — {getObraNome(oid)}</td><td className={td + ' text-right'}>{formatBRL(v)}</td><td className={td} /></tr>)}
+                          <tr className="font-bold bg-slate-50"><td className={td} colSpan={9}>Total da folha</td><td className={td + ' text-right'}>{formatBRL(totalGeral)}</td><td className={td} /></tr>
+                        </tbody>
+                      </table>
+                      <p className="text-[10px] text-slate-500">P = presenças · F = faltas · A = atestados. Diarista: presenças × diária. Mensalista: salário − (salário ÷ 30 × faltas). Valores sem encargos.</p>
+                      <div className="grid grid-cols-2 gap-10 pt-10 text-center text-slate-600 text-[11px]">
+                        <div className="border-t border-slate-400 pt-1">Elaborado por</div>
+                        <div className="border-t border-slate-400 pt-1">Aprovado — Engenheiro responsável</div>
+                      </div>
+                    </RelImpresso>
+                  );
+                })();
                 return (
                   <div className="space-y-6">
+                    {relFolha}
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h3 className="font-bold text-slate-800 text-lg">Folha de pagamento — {rotuloMes(mesFolha)}</h3>
@@ -4195,7 +4358,7 @@
                       <div className="no-print flex items-center gap-2">
                         <button type="button" onClick={() => setMesFolha(somaMes(mesFolha, -1))} title="Mês anterior" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100"><Icon name="chevronLeft" className="w-4 h-4" /></button>
                         <button type="button" onClick={() => setMesFolha(somaMes(mesFolha, 1))} disabled={mesAtual} title="Próximo mês" className="p-2 border border-slate-300 rounded-lg hover:bg-slate-100 disabled:opacity-30"><Icon name="chevronRight" className="w-4 h-4" /></button>
-                        <button type="button" onClick={() => window.print()} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
+                        <button type="button" onClick={() => setRel({ tipo: 'folha' })} className="flex items-center gap-1.5 px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold hover:bg-slate-100"><Icon name="print" className="w-4 h-4" /> Imprimir</button>
                         {fechada
                           ? <button type="button" disabled={enviando} onClick={reabrirFolha} className="px-4 py-2 border border-red-300 text-red-700 rounded-lg text-sm font-bold hover:bg-red-50 disabled:opacity-50">Reabrir folha</button>
                           : <button type="button" disabled={enviando || !itens.length || selectedObra !== 'ALL'} onClick={() => fecharFolha(itens)}
@@ -4426,15 +4589,71 @@
                 </div>
               )}
 
+              {aba === 'empresa' && (() => {
+                const f = formEmpresa, inp = 'w-full border border-slate-300 rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900', lbl = 'block text-xs font-bold uppercase text-slate-500';
+                const campo = (c, rot, ph, cls = '') => <label className={`${lbl} ${cls}`}>{rot}<input value={f[c]} onChange={e => mudarEmpresa(c, e.target.value)} placeholder={ph} className={inp} /></label>;
+                return (
+                  <div className="space-y-6 max-w-4xl">
+                    <div>
+                      <h3 className="font-bold text-slate-800 text-lg">Dados da construtora</h3>
+                      <p className="text-xs text-slate-500">Aparecem no cabeçalho de todos os documentos impressos: RDO, pedido de compra, boletim, cronograma, fichas e relatórios.</p>
+                    </div>
+                    <form onSubmit={salvarEmpresa} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4">
+                      <div className="flex flex-wrap items-center gap-4">
+                        <div className="w-40 h-24 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center bg-slate-50 overflow-hidden">
+                          {f.logo ? <img src={f.logo} alt="Logo" className="max-w-full max-h-full object-contain" /> : <span className="text-xs text-slate-400">sem logo</span>}
+                        </div>
+                        <div className="space-y-1">
+                          <label className="inline-block cursor-pointer px-4 py-2 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100">Escolher logo<input type="file" accept="image/*" className="hidden" onChange={e => { lerLogo(e.target.files[0]); e.target.value = ''; }} /></label>
+                          {f.logo && <button type="button" onClick={() => mudarEmpresa('logo', '')} className="ml-2 text-xs font-bold text-red-700 hover:underline">remover</button>}
+                          <p className="text-[11px] text-slate-500">PNG com fundo transparente fica melhor. A imagem é reduzida automaticamente.</p>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {campo('razao_social', 'Razão social', 'Ex.: Construtora Cabo Branco Ltda')}
+                        {campo('nome_fantasia', 'Nome fantasia', 'opcional')}
+                        {campo('cnpj', 'CNPJ', '00.000.000/0000-00')}
+                        {campo('registro_crea', 'Registro da empresa no CREA', 'opcional')}
+                        {campo('endereco', 'Endereço', 'Rua, nº, bairro', 'sm:col-span-2')}
+                        {campo('cidade_uf', 'Cidade / UF', 'João Pessoa/PB')}
+                        {campo('telefone', 'Telefone / WhatsApp', '(83) 9 0000-0000')}
+                        {campo('email', 'E-mail', 'contato@...')}
+                        {campo('site', 'Site', 'opcional')}
+                        {campo('responsavel_tecnico', 'Responsável técnico', 'Nome do engenheiro — CREA nº')}
+                      </div>
+                      <div className="flex justify-end gap-2">
+                        {empForm && <button type="button" onClick={() => setEmpForm(null)} className="px-4 py-2 border rounded-lg font-bold">Descartar</button>}
+                        <button type="submit" disabled={enviando || !empForm} className="disabled:opacity-40 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                      </div>
+                    </form>
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                      <p className="text-xs font-bold uppercase text-slate-500 mb-3">Como sai nos documentos</p>
+                      <EmpresaCtx.Provider value={f}><CabecalhoEmpresa titulo="Exemplo de documento" /></EmpresaCtx.Provider>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {aba === 'relatorios' && (
                 <div className="space-y-6">
                   <div className="flex justify-between items-center no-print">
                     <h3 className="font-bold text-slate-800">Relatório Gerencial Consolidado</h3>
-                    <button onClick={() => window.print()} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                    <button onClick={() => setRel({ tipo: 'gerencial' })} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
                       <Icon name="print" className="w-4 h-4" /> Imprimir / Salvar PDF
                     </button>
                   </div>
 
+                  {user.perfil === 'Engenheiro' && (
+                    <div className="bg-white p-5 rounded-2xl border border-slate-200 flex flex-wrap items-end gap-3">
+                      <div className="flex-1 min-w-[14rem]">
+                        <h4 className="font-bold text-slate-900">Relatório mensal da obra</h4>
+                        <p className="text-xs text-slate-500">Avanço físico × previsto, custos, PPC, qualidade, diário, perdas e estoque. Para a diretoria ou o cliente.</p>
+                      </div>
+                      <select value={relMensal.obraId || data.obras[0]?.id || ''} onChange={e => setRelMensal({ ...relMensal, obraId: e.target.value })} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold">{data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}</select>
+                      <input type="month" value={relMensal.mes || hojeISO().slice(0, 7)} max={hojeISO().slice(0, 7)} onChange={e => setRelMensal({ ...relMensal, mes: e.target.value })} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" />
+                      <button type="button" onClick={gerarMensal} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="print" className="w-4 h-4" /> Gerar</button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-white p-5 rounded-2xl border border-slate-200">
                       <h4 className="font-bold text-slate-900 mb-3">1. Resumo Financeiro por Obra</h4>
@@ -4557,6 +4776,7 @@
                 <form onSubmit={salvarObra} className="space-y-3 text-sm">
                   <input type="text" placeholder="Nome da Obra" value={novaObraForm.nome} onChange={e => setNovaObraForm({ ...novaObraForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Endereço Completo" value={novaObraForm.endereco} onChange={e => setNovaObraForm({ ...novaObraForm, endereco: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
+                  <input type="text" placeholder="Nº da ART / RRT (sai no Diário de Obra)" value={novaObraForm.art || ''} onChange={e => setNovaObraForm({ ...novaObraForm, art: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
                   <input type="text" placeholder="Engenheiro / Mestre Responsável" value={novaObraForm.responsavel} onChange={e => setNovaObraForm({ ...novaObraForm, responsavel: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="number" min="0" step="0.01" placeholder="Orçamento Previsto (R$)" value={novaObraForm.orcamento} onChange={e => setNovaObraForm({ ...novaObraForm, orcamento: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <div className="grid grid-cols-2 gap-2">
@@ -4690,6 +4910,154 @@
               </div>
             </div>
           )}
+
+          {rel?.tipo === 'presenca' && (() => {
+            const td = 'px-2 py-1.5 border border-slate-300 align-top', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold text-left';
+            const cel = 'px-0.5 py-1 border border-slate-300 text-center text-[9px]';
+            const fs = funcsVisiveis;
+            const sig = { Presente: 'P', Falta: 'F', Atestado: 'A' };
+            const tot = { Presente: 0, Falta: 0, Atestado: 0 };
+            return (
+              <RelImpresso titulo="Controle de frequência" paisagem onFechar={() => setRel(null)} cabecalho={<>
+                <h3 className="text-xl font-extrabold">{capMes(mesPresenca)}</h3>
+                <p className="text-sm text-slate-600">{selectedObra === 'ALL' ? 'Todas as obras' : getObraNome(selectedObra)} · {fs.length} funcionário(s)</p>
+              </>}>
+                <table className="w-full border-collapse">
+                  <thead><tr><th className={th}>Funcionário</th>{diasMes.map(d => { const wd = new Date(d + 'T12:00:00').getDay(); return <th key={d} className={cel + ' bg-slate-100 font-bold' + (wd === 0 ? ' bg-slate-300' : '')}>{Number(d.slice(8))}<br /><span className="font-normal">{'DSTQQSS'[wd]}</span></th>; })}<th className={cel + ' bg-slate-100 font-bold'}>P</th><th className={cel + ' bg-slate-100 font-bold'}>F</th><th className={cel + ' bg-slate-100 font-bold'}>A</th></tr></thead>
+                  <tbody>
+                    {fs.map(f => { const r = resumoPresenca(f.id); tot.Presente += r.Presente; tot.Falta += r.Falta; tot.Atestado += r.Atestado; return (
+                      <tr key={f.id}><td className={td + ' text-[10px] whitespace-nowrap'}><b>{f.nome}</b><span className="block text-[9px] text-slate-500">{f.funcao}</span></td>
+                        {diasMes.map(d => { const st = presencaMap[f.id + '|' + d]; const wd = new Date(d + 'T12:00:00').getDay(); return <td key={d} className={cel + (wd === 0 ? ' bg-slate-200' : '') + (st === 'Falta' ? ' font-bold' : '')}>{st ? sig[st] : ''}</td>; })}
+                        <td className={cel + ' font-bold'}>{r.Presente}</td><td className={cel + ' font-bold'}>{r.Falta}</td><td className={cel + ' font-bold'}>{r.Atestado}</td></tr>
+                    ); })}
+                    <tr className="bg-slate-50 font-bold"><td className={td}>Total</td><td className={cel} colSpan={diasMes.length} /><td className={cel}>{tot.Presente}</td><td className={cel}>{tot.Falta}</td><td className={cel}>{tot.Atestado}</td></tr>
+                  </tbody>
+                </table>
+                <p className="text-[10px] text-slate-500">P = presente · F = falta · A = atestado · em branco = sem registro. Domingos sombreados.</p>
+                <div className="grid grid-cols-2 gap-10 pt-8 text-center text-slate-600 text-[11px]">
+                  <div className="border-t border-slate-400 pt-1">Mestre de obras</div>
+                  <div className="border-t border-slate-400 pt-1">Engenheiro responsável</div>
+                </div>
+              </RelImpresso>
+            );
+          })()}
+
+          {rel?.tipo === 'gerencial' && (() => {
+            const td = 'px-2 py-1.5 border border-slate-300 align-top', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold text-left';
+            const pend = comprasVisiveis.filter(c => c.status !== 'Entregue' && c.status !== 'Cancelado');
+            return (
+              <RelImpresso titulo="Relatório gerencial consolidado" onFechar={() => setRel(null)} cabecalho={<h3 className="text-xl font-extrabold">Posição em {fmtData(hojeISO())}</h3>}>
+                <p className="font-bold uppercase text-[10px] text-slate-500">1. Resumo financeiro por obra</p>
+                <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th}>Obra</th><th className={th}>Situação</th><th className={th + ' text-right'}>Orçado</th><th className={th + ' text-right'}>Gasto</th><th className={th + ' text-right'}>Saldo</th><th className={th + ' text-right'}>% gasto</th></tr></thead><tbody>
+                  {obrasVisiveis.map(o => { const g = data.despesas.filter(d => d.obraId === o.id).reduce((t, d) => t + Number(d.valor), 0); return <tr key={o.id}><td className={td + ' font-semibold'}>{o.nome}</td><td className={td}>{o.status}</td><td className={td + ' text-right'}>{formatBRL(o.orcamento)}</td><td className={td + ' text-right'}>{formatBRL(g)}</td><td className={td + ' text-right'}>{formatBRL(o.orcamento - g)}</td><td className={td + ' text-right'}>{o.orcamento ? (g / o.orcamento * 100).toFixed(0) + '%' : '—'}</td></tr>; })}
+                </tbody></table>
+                <p className="font-bold uppercase text-[10px] text-slate-500">2. Compras pendentes de entrega</p>
+                <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th}>Material</th><th className={th}>Obra</th><th className={th}>Fornecedor</th><th className={th + ' text-right'}>Qtd</th><th className={th}>Situação</th><th className={th}>Previsão</th></tr></thead><tbody>
+                  {pend.map(c => { const m = getMat(c.materialId); return <tr key={c.id}><td className={td}>{m?.nome}</td><td className={td}>{getObraNome(c.obraId)}</td><td className={td}>{data.fornecedores.find(f => f.id === c.fornecedorId)?.nome || '—'}</td><td className={td + ' text-right'}>{c.qtd.toLocaleString('pt-BR')} {m?.unidade}</td><td className={td}>{c.status === 'Comprado' ? 'Aprovado' : c.status}</td><td className={td}>{fmtData(c.entrega)}</td></tr>; })}
+                  {!pend.length && <tr><td className={td} colSpan={6}>Nenhuma.</td></tr>}
+                </tbody></table>
+              </RelImpresso>
+            );
+          })()}
+
+          {rel?.tipo === 'mensal' && (() => {
+            const td = 'px-2 py-1.5 border border-slate-300 align-top', th = 'px-2 py-1.5 border border-slate-300 bg-slate-100 text-[10px] uppercase font-bold text-left';
+            const ob = data.obras.find(o => o.id === rel.obraId); if (!ob) return null;
+            const ini = rel.mes + '-01', fimM = fimDoMes(rel.mes), fim = fimM < hojeISO() ? fimM : hojeISO();
+            const etapas = data.etapas.filter(e => e.obra_id === ob.id).sort((a, b) => a.ordem - b.ordem);
+            const vE = (e) => valorEtapa(e.id), orc = etapas.reduce((t, e) => t + vE(e), 0);
+            const peso = (e) => orc > 0 ? vE(e) : 1, sp = etapas.reduce((t, e) => t + peso(e), 0) || 1;
+            const avAte = (e, dia) => { const hs = data.avancoHist.filter(h => h.etapa_id === e.id && h.dia <= dia); return hs.length ? hs[hs.length - 1].avanco : (dia >= hojeISO() ? e.avanco : 0); };
+            const avIni = etapas.reduce((t, e) => t + peso(e) * avAte(e, somaDiasDe(ini, -1)), 0) / sp;
+            const avFim = etapas.reduce((t, e) => t + peso(e) * avAte(e, fim), 0) / sp;
+            const prevFim = etapas.reduce((t, e) => t + peso(e) * (planejadoEm(e, fim) ?? 0), 0) / sp;
+            const desps = data.despesas.filter(d => d.obraId === ob.id);
+            const gastoAc = desps.filter(d => (d.vencimento || '') <= fim).reduce((t, d) => t + d.valor, 0);
+            const doMes = desps.filter(d => d.vencimento >= ini && d.vencimento <= fimM);
+            const porCat = Object.entries(doMes.reduce((a, d) => { a[d.categoria] = (a[d.categoria] || 0) + d.valor; return a; }, {})).sort((a, b) => b[1] - a[1]);
+            const gastoMes = doMes.reduce((t, d) => t + d.valor, 0), pagoMes = doMes.filter(d => d.status === 'Pago').reduce((t, d) => t + d.valor, 0);
+            const recMes = data.receitas.filter(r => r.obra_id === ob.id && r.vencimento >= ini && r.vencimento <= fimM);
+            const prox30 = desps.filter(d => d.status !== 'Pago' && d.vencimento > fim && d.vencimento <= somaDiasDe(fim, 30)).reduce((t, d) => t + d.valor, 0);
+            const semanas = [...new Set(data.tarefas.filter(t => t.obra_id === ob.id && t.semana >= segundaDe(ini) && t.semana <= fim).map(t => t.semana))].sort();
+            const linhasPpc = semanas.map(w => { const ts = data.tarefas.filter(t => t.obra_id === ob.id && t.semana === w); return { w, n: ts.length, ok: ts.filter(t => t.status === 'Concluída').length }; });
+            const nT = linhasPpc.reduce((t, x) => t + x.n, 0), nOk = linhasPpc.reduce((t, x) => t + x.ok, 0);
+            const causasMes = Object.entries(data.tarefas.filter(t => t.obra_id === ob.id && semanas.includes(t.semana) && t.causa).reduce((a, t) => { a[t.causa] = (a[t.causa] || 0) + 1; return a; }, {})).sort((a, b) => b[1] - a[1]);
+            const insps = data.inspecoes.filter(i => i.obra_id === ob.id && i.dia >= ini && i.dia <= fimM);
+            const inspNc = insps.filter(i => i.itens.some(x => x.resultado === 'Não conforme')).length;
+            const pends = data.pendencias.filter(x => x.obra_id === ob.id && x.status !== 'Resolvida');
+            const pendAtr = pends.filter(x => x.prazo && x.prazo < hojeISO()).length;
+            const resolvidasMes = data.pendencias.filter(x => x.obra_id === ob.id && x.resolvida_em && x.resolvida_em.slice(0, 10) >= ini && x.resolvida_em.slice(0, 10) <= fimM).length;
+            const rdos = data.diarios.filter(d => d.obra_id === ob.id && d.dia >= ini && d.dia <= fimM);
+            const chuva = rdos.filter(d => ['Chuva', 'Impraticável'].includes(d.clima_manha) || ['Chuva', 'Impraticável'].includes(d.clima_tarde)).length;
+            const impr = rdos.filter(d => d.clima_manha === 'Impraticável' || d.clima_tarde === 'Impraticável').length;
+            const uteis = (() => { let n = 0, d = ini; while (d <= fim) { if (new Date(d + 'T12:00:00').getDay() !== 0) n++; d = somaDiasDe(d, 1); } return n; })();
+            const baixo = data.materiais.filter(m => (m.estoques[ob.id] || 0) < m.min && m.min > 0);
+            const perdas = (rel.perdas || []).map(l => ({ ...l, mat: getMat(l.material_id), pct: l.previsto > 0 ? (l.realizado - l.previsto) / l.previsto * 100 : null })).filter(l => l.pct !== null && l.pct > l.tolerancia);
+            const pctf = (v) => v.toFixed(0) + '%';
+            const kpi = (rot, val, sub) => <div className="border border-slate-300 rounded p-2"><p className="text-[10px] font-bold uppercase text-slate-500">{rot}</p><p className="font-extrabold text-lg">{val}</p>{sub && <p className="text-[10px] text-slate-600">{sub}</p>}</div>;
+            const sec = (t) => <p className="font-bold uppercase text-[10px] text-slate-500 pt-1">{t}</p>;
+            return (
+              <RelImpresso titulo="Relatório mensal da obra" onFechar={() => setRel(null)} cabecalho={<>
+                <h3 className="text-xl font-extrabold">{ob.nome} — {capMes(rel.mes)}</h3>
+                <p className="text-sm text-slate-600">{ob.endereco}{ob.art ? ` · ART ${ob.art}` : ''} · prazo {fmtData(ob.inicio)} a {fmtData(ob.previsao)}{fim < fimM ? ` · dados até ${fmtData(fim)}` : ''}</p>
+              </>}>
+                <div className="grid grid-cols-4 gap-2">
+                  {kpi('Avanço físico', pctf(avFim), `previsto ${pctf(prevFim)} · +${(avFim - avIni).toFixed(1)} pts no mês`)}
+                  {kpi('Custo acumulado', formatBRL(gastoAc), orc ? `${pctf(gastoAc / orc * 100)} do orçado (${formatBRL(orc)})` : '')}
+                  {kpi('Gasto no mês', formatBRL(gastoMes), `pago ${formatBRL(pagoMes)}`)}
+                  {kpi('PPC do mês', nT ? pctf(nOk / nT * 100) : '—', nT ? `${nOk} de ${nT} tarefas` : 'sem planejamento')}
+                </div>
+                {sec('1. Avanço por etapa')}
+                <table className="w-full border-collapse text-[11px]"><thead><tr><th className={th}>Etapa</th><th className={th}>Período</th><th className={th + ' text-right'}>Previsto</th><th className={th + ' text-right'}>Realizado</th><th className={th + ' text-right'}>No mês</th><th className={th}>Situação</th></tr></thead><tbody>
+                  {etapas.map(e => { const p = planejadoEm(e, fim), a = avAte(e, fim), a0 = avAte(e, somaDiasDe(ini, -1)); const st = a >= 100 ? 'Concluída' : p !== null && p - a > 10 ? 'Atrasada' : a > 0 ? 'Em andamento' : 'Não iniciada'; return (
+                    <tr key={e.id}><td className={td}>{e.nome}</td><td className={td + ' whitespace-nowrap'}>{e.inicio ? `${fmtData(e.inicio).slice(0, 5)}/${e.inicio.slice(2, 4)} a ${fmtData(e.fim).slice(0, 5)}/${e.fim.slice(2, 4)}` : '—'}</td><td className={td + ' text-right'}>{p === null ? '—' : pctf(p)}</td><td className={td + ' text-right font-bold'}>{pctf(a)}</td><td className={td + ' text-right'}>{a - a0 > 0 ? '+' + (a - a0).toFixed(0) : '—'}</td><td className={td + (st === 'Atrasada' ? ' font-bold' : '')}>{st}</td></tr>
+                  ); })}
+                </tbody></table>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>{sec('2. Despesas do mês por categoria')}
+                    <table className="w-full border-collapse text-[11px]"><tbody>
+                      {porCat.map(([c, v]) => <tr key={c}><td className={td}>{c}</td><td className={td + ' text-right'}>{formatBRL(v)}</td></tr>)}
+                      <tr className="font-bold"><td className={td}>Total</td><td className={td + ' text-right'}>{formatBRL(gastoMes)}</td></tr>
+                      <tr><td className={td}>Recebido do cliente no mês</td><td className={td + ' text-right'}>{formatBRL(recMes.filter(r => r.status === 'Recebido').reduce((t, r) => t + r.valor, 0))}</td></tr>
+                      <tr><td className={td}>A pagar nos próximos 30 dias</td><td className={td + ' text-right'}>{formatBRL(prox30)}</td></tr>
+                    </tbody></table>
+                  </div>
+                  <div>{sec('3. Planejamento semanal (PPC)')}
+                    <table className="w-full border-collapse text-[11px]"><tbody>
+                      {linhasPpc.map(x => <tr key={x.w}><td className={td}>Semana de {fmtData(x.w).slice(0, 5)}</td><td className={td + ' text-right'}>{x.ok}/{x.n}</td><td className={td + ' text-right font-bold'}>{pctf(x.ok / x.n * 100)}</td></tr>)}
+                      {!linhasPpc.length && <tr><td className={td}>Sem tarefas planejadas no mês.</td></tr>}
+                      {causasMes.length > 0 && <tr><td className={td} colSpan={3}>Causas: {causasMes.map(([c, n]) => `${c} (${n})`).join(', ')}</td></tr>}
+                    </tbody></table>
+                  </div>
+                  <div>{sec('4. Qualidade')}
+                    <table className="w-full border-collapse text-[11px]"><tbody>
+                      <tr><td className={td}>Inspeções no mês</td><td className={td + ' text-right'}>{insps.length}{inspNc ? ` (${inspNc} com não conformidade)` : ''}</td></tr>
+                      <tr><td className={td}>Pendências resolvidas no mês</td><td className={td + ' text-right'}>{resolvidasMes}</td></tr>
+                      <tr><td className={td}>Pendências em aberto</td><td className={td + ' text-right font-bold'}>{pends.length}{pendAtr ? ` (${pendAtr} atrasadas)` : ''}</td></tr>
+                    </tbody></table>
+                  </div>
+                  <div>{sec('5. Diário de obra e clima')}
+                    <table className="w-full border-collapse text-[11px]"><tbody>
+                      <tr><td className={td}>RDOs registrados</td><td className={td + ' text-right'}>{rdos.length} de {uteis} dias (seg. a sáb.)</td></tr>
+                      <tr><td className={td}>Dias com chuva</td><td className={td + ' text-right'}>{chuva}</td></tr>
+                      <tr><td className={td}>Dias impraticáveis</td><td className={td + ' text-right'}>{impr}</td></tr>
+                    </tbody></table>
+                  </div>
+                </div>
+                {sec('6. Materiais: perdas acima da tolerância e estoque baixo')}
+                <table className="w-full border-collapse text-[11px]"><tbody>
+                  {rel.perdas === null && <tr><td className={td}>Calculando perdas…</td></tr>}
+                  {perdas.map(l => <tr key={l.material_id}><td className={td}>Perda — {l.mat?.nome}</td><td className={td + ' text-right font-bold'}>+{l.pct.toFixed(1)}% (tolerância {l.tolerancia}%)</td></tr>)}
+                  {rel.perdas !== null && !perdas.length && <tr><td className={td}>Perdas</td><td className={td + ' text-right'}>todos os materiais dentro da tolerância</td></tr>}
+                  {baixo.map(m => <tr key={m.id}><td className={td}>Estoque baixo — {m.nome}</td><td className={td + ' text-right'}>{(m.estoques[ob.id] || 0).toLocaleString('pt-BR')} de mínimo {m.min.toLocaleString('pt-BR')} {m.unidade}</td></tr>)}
+                </tbody></table>
+                <div className="grid grid-cols-2 gap-10 pt-10 text-center text-slate-600 text-[11px]">
+                  <div className="border-t border-slate-400 pt-1">Engenheiro responsável</div>
+                  <div className="border-t border-slate-400 pt-1">Diretoria / Contratante</div>
+                </div>
+              </RelImpresso>
+            );
+          })()}
 
           {tarefaForm && (() => {
             const etapasObra = data.etapas.filter(e => e.obra_id === tarefaForm.obraId).sort((a, b) => a.ordem - b.ordem);
@@ -4914,6 +5282,7 @@
             return (
               <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl max-w-3xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-sm">
+                  <CabecalhoEmpresa />
                   <div className="flex justify-between items-start gap-4">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-500">{i.tipo === 'FVS' ? 'Ficha de verificação de serviço' : 'Ficha de verificação de material'}</p>
@@ -5260,6 +5629,7 @@
             return (
               <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl max-w-6xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto text-sm">
+                  <CabecalhoEmpresa />
                   <div className="flex flex-wrap justify-between items-start gap-3">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Mapa de cotação</p>
@@ -5546,6 +5916,7 @@
             return (
               <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl max-w-4xl w-full p-8 space-y-4 max-h-[95vh] overflow-y-auto text-xs">
+                  <CabecalhoEmpresa />
                   <div className="flex justify-between items-start gap-4">
                     <div>
                       <p className="font-bold uppercase tracking-wider text-slate-500">Boletim de medição nº {m.numero}</p>
@@ -5636,6 +6007,7 @@
             return (
               <div className="ficha-epi fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
                 <div className="bg-white rounded-2xl max-w-3xl w-full p-8 space-y-5 max-h-[95vh] overflow-y-auto text-sm">
+                  <CabecalhoEmpresa />
                   <div className="flex justify-between items-start gap-4">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Ficha de controle de entrega de EPI (NR-6)</p>
@@ -5739,6 +6111,7 @@
             </div>
           )}
         </div>
+        </EmpresaCtx.Provider>
       );
     }
 
