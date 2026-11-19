@@ -61,6 +61,7 @@
         wallet: <><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>,
         book: <><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8"/><path d="M8 11h6"/></>,
         camera: <><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>,
+        calendar: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M7 14h4M7 18h8"/></>,
         ruler: <><path d="M21.3 8.7 8.7 21.3a1 1 0 0 1-1.4 0l-4.6-4.6a1 1 0 0 1 0-1.4L15.3 2.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4z"/><path d="m7.5 10.5 2 2M10.5 7.5l2 2M13.5 4.5l2 2M4.5 13.5l2 2"/></>,
         shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></>,
         search: <><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></>,
@@ -165,7 +166,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'diario', 'compras', 'financeiro', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'diario', 'compras', 'financeiro', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -175,8 +176,8 @@
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
-        abas: ['materiais', 'obras', 'diario', 'compras', 'funcionarios', 'epi', 'documentos'],
-        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar'],
+        abas: ['materiais', 'obras', 'orcamento', 'diario', 'compras', 'funcionarios', 'epi', 'documentos'],
+        acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar', 'orcamento.avanco'],
       },
     };
 
@@ -184,11 +185,43 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
     const num = (v) => v === null || v === undefined ? v : Number(v);
+
+    // ---------- Orçamento e cronograma ----------
+    const r2 = (v) => Math.round(v * 100) / 100;
+    // "1.234,56" / "1234.56" / "R$ 10" → número
+    const numBR = (t) => {
+      let x = String(t ?? '').replace(/R\$|\s/g, '');
+      if (!x) return NaN;
+      if (x.includes(',')) x = x.replace(/\./g, '').replace(',', '.');
+      return Number(x);
+    };
+    const diasEntre = (a, b) => Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 864e5);
+    const mesesEntre = (ini, fim) => { const r = []; let [y, m] = ini.slice(0, 7).split('-').map(Number); const [yf, mf] = fim.slice(0, 7).split('-').map(Number);
+      while (y < yf || (y === yf && m <= mf)) { r.push(`${y}-${String(m).padStart(2, '0')}`); m++; if (m > 12) { m = 1; y++; } } return r; };
+    const fimDoMes = (mes) => { const [y, m] = mes.split('-').map(Number); return isoLocal(new Date(y, m, 0)); };
+    // distribui o valor da etapa pelos meses, proporcional aos dias
+    const distribuirPorMes = (valor, ini, fim) => {
+      const tot = diasEntre(ini, fim) + 1, out = {};
+      for (const mes of mesesEntre(ini, fim)) {
+        const a = mes + '-01' > ini ? mes + '-01' : ini, b = fimDoMes(mes) < fim ? fimDoMes(mes) : fim;
+        out[mes] = valor * (diasEntre(a, b) + 1) / tot;
+      }
+      return out;
+    };
+    // % que deveria estar pronto numa data, pelo cronograma (linear entre início e fim)
+    const planejadoEm = (e, dia) => !e.inicio || !e.fim ? null : dia < e.inicio ? 0 : dia >= e.fim ? 100 : (diasEntre(e.inicio, dia) + 1) / (diasEntre(e.inicio, e.fim) + 1) * 100;
+    const situacaoEtapa = (e, hoje) => {
+      if (e.avanco >= 100) return 'Concluída';
+      const pl = planejadoEm(e, hoje);
+      if (pl === null) return e.avanco > 0 ? 'Em andamento' : 'Sem datas';
+      if (pl - e.avanco > 10) return 'Atrasada';
+      return e.avanco > 0 ? 'Em andamento' : pl > 0 ? 'Atrasada' : 'Não iniciada';
+    };
 
     // ---------- Uso sem internet ----------
     const ehErroRede = (e) => !!e && (e.rede || /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(e.message || ''));
@@ -270,8 +303,11 @@
         eng ? sb.from('contrato_itens').select('*').order('ordem', { ascending: true }) : Promise.resolve({ data: [] }),
         eng ? sb.from('medicoes').select('*').order('numero', { ascending: true }) : Promise.resolve({ data: [] }),
         eng ? sb.from('medicao_itens').select('*') : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Mestre de Obras') ? sb.from('etapas').select('*').order('ordem', { ascending: true }) : Promise.resolve({ data: [] }),
+        eng ? sb.from('etapa_itens').select('*').order('ordem', { ascending: true }) : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Mestre de Obras') ? sb.from('avanco_historico').select('*').order('dia', { ascending: true }) : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist] = (await Promise.all(consultas)).map(ok);
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
@@ -290,7 +326,7 @@
           id: c.id, obraId: c.obra_id, materialId: c.material_id, fornecedorId: c.fornecedor_id, qtd: num(c.qtd),
           precoUnit: num(c.preco_unit), entrega: c.entrega, status: c.status, solicitante: c.solicitante, dataSolicitacao: c.data_solicitacao
         })),
-        despesas: despesas.map(d => ({ id: d.id, compraId: d.compra_id, obraId: d.obra_id, descricao: d.descricao, categoria: d.categoria, valor: num(d.valor), vencimento: d.vencimento, status: d.status })),
+        despesas: despesas.map(d => ({ id: d.id, compraId: d.compra_id, obraId: d.obra_id, etapaId: d.etapa_id || '', descricao: d.descricao, categoria: d.categoria, valor: num(d.valor), vencimento: d.vencimento, status: d.status })),
         funcionarios: funcs.map(f => ({ id: f.id, nome: f.nome, funcao: f.funcao, obraId: f.obra_id, presenca: f.presenca })),
         perfis,
         presencas: presencas.map(p => ({ funcionarioId: p.funcionario_id, dia: p.dia, status: p.status })),
@@ -306,6 +342,9 @@
         contratoItens: contItens.map(i => ({ ...i, qtd: num(i.qtd), preco_unit: num(i.preco_unit) })),
         medicoes: medicoes.map(m => ({ ...m, valor_bruto: num(m.valor_bruto), retencao: num(m.retencao), valor_liquido: num(m.valor_liquido) })),
         medicaoItens: medItens.map(i => ({ ...i, qtd: num(i.qtd) })),
+        etapas: etapas.map(e => ({ ...e, avanco: num(e.avanco) })),
+        etapaItens: etapaItens.map(i => ({ ...i, qtd: num(i.qtd), preco_unit: num(i.preco_unit) })),
+        avancoHist: avancoHist.map(h => ({ ...h, avanco: num(h.avanco) })),
       };
     }
 
@@ -372,6 +411,13 @@
       const [epiFiltroFunc, setEpiFiltroFunc] = useState('');
       const [fichaEpi, setFichaEpi] = useState(null);   // id do funcionário com a ficha aberta
       const [contratoSel, setContratoSel] = useState('');
+      const [orcObra, setOrcObra] = useState('');
+      const [etapaModal, setEtapaModal] = useState(false);
+      const [etapaForm, setEtapaForm] = useState({});
+      const [colarModal, setColarModal] = useState(false);
+      const [colarTexto, setColarTexto] = useState('');
+      const [avancoEdit, setAvancoEdit] = useState({});
+      const [curvaHover, setCurvaHover] = useState(null);
       const [contratoModal, setContratoModal] = useState(false);
       const [contratoForm, setContratoForm] = useState({});
       const [medModal, setMedModal] = useState(false);
@@ -598,7 +644,7 @@
       };
       const abrirDespesa = (desp) => {
         if (!desp && !data.obras.length) return alert('Cadastre ao menos uma obra antes.');
-        setNovaDespesaForm(desp ? { ...desp } : { obraId: primeiraObra(), descricao: '', categoria: 'Material', valor: '', vencimento: somaDias(15), status: 'A pagar' });
+        setNovaDespesaForm(desp ? { ...desp } : { obraId: primeiraObra(), etapaId: '', descricao: '', categoria: 'Material', valor: '', vencimento: somaDias(15), status: 'A pagar' });
         setNovaDespesaModal(true);
       };
       const abrirFuncionario = (func) => {
@@ -659,7 +705,8 @@
         const valor = Number(novaDespesaForm.valor);
         if (!(valor > 0)) return alert('Informe um valor maior que zero.');
         const reg = { obra_id: novaDespesaForm.obraId, descricao: novaDespesaForm.descricao.trim(), categoria: novaDespesaForm.categoria,
-                      valor, vencimento: novaDespesaForm.vencimento || null, status: novaDespesaForm.status };
+                      valor, vencimento: novaDespesaForm.vencimento || null, status: novaDespesaForm.status,
+                      etapa_id: data.etapas.some(e => e.id === novaDespesaForm.etapaId && e.obra_id === novaDespesaForm.obraId) ? novaDespesaForm.etapaId : null };
         if (await executar(async () => ok(novaDespesaForm.id
           ? await sb.from('despesas').update(reg).eq('id', novaDespesaForm.id)
           : await sb.from('despesas').insert(reg)))) setNovaDespesaModal(false);
@@ -808,6 +855,95 @@
         if (janela) janela.location.href = u.signedUrl; else window.location.href = u.signedUrl;
       };
 
+      // ---------- Orçamento e cronograma ----------
+      const etapasAtrasadas = data.etapas.filter(e => (selectedObra === 'ALL' || e.obra_id === selectedObra) && situacaoEtapa(e, hojeISO()) === 'Atrasada').length;
+      const valorEtapa = (id) => data.etapaItens.filter(i => i.etapa_id === id).reduce((s, i) => s + r2(i.qtd * i.preco_unit), 0);
+      const abrirEtapa = (e, obraId) => {
+        setEtapaForm(e ? { id: e.id, obraId: e.obra_id, nome: e.nome, inicio: e.inicio || '', fim: e.fim || '',
+            itens: data.etapaItens.filter(i => i.etapa_id === e.id).map(i => ({ id: i.id, descricao: i.descricao, unidade: i.unidade, qtd: i.qtd, preco: i.preco_unit })) }
+          : { obraId, nome: '', inicio: hojeISO(), fim: somaDias(30), itens: [{ descricao: '', unidade: 'vb', qtd: 1, preco: '' }] });
+        setEtapaModal(true);
+      };
+      const salvarEtapa = async (ev) => {
+        ev.preventDefault();
+        const f = etapaForm;
+        if (!f.nome.trim()) return alert('Informe o nome da etapa.');
+        if (f.inicio && f.fim && f.fim < f.inicio) return alert('O fim não pode ser antes do início.');
+        const itens = f.itens.filter(i => i.descricao.trim());
+        if (itens.some(i => !(numBR(i.qtd) >= 0) || !(numBR(i.preco) >= 0))) return alert('Cada item precisa de quantidade e preço unitário.');
+        const okS = await executar(async () => {
+          const reg = { obra_id: f.obraId, nome: f.nome.trim(), inicio: f.inicio || null, fim: f.fim || null };
+          let id = f.id;
+          if (id) ok(await sb.from('etapas').update(reg).eq('id', id));
+          else {
+            const ordem = Math.max(0, ...data.etapas.filter(x => x.obra_id === f.obraId).map(x => x.ordem)) + 1;
+            id = ok(await sb.from('etapas').insert({ ...reg, ordem }).select().single()).id;
+          }
+          for (const a of data.etapaItens.filter(i => i.etapa_id === id)) if (!itens.some(i => i.id === a.id)) ok(await sb.from('etapa_itens').delete().eq('id', a.id));
+          for (const [k, i] of itens.entries()) {
+            const row = { descricao: i.descricao.trim(), unidade: i.unidade || 'vb', qtd: numBR(i.qtd), preco_unit: numBR(i.preco), ordem: k + 1 };
+            if (i.id) ok(await sb.from('etapa_itens').update(row).eq('id', i.id));
+            else ok(await sb.from('etapa_itens').insert({ ...row, etapa_id: id }));
+          }
+        });
+        if (okS) setEtapaModal(false);
+      };
+      const excluirEtapa = (e) => {
+        if (!confirm(`Excluir a etapa "${e.nome}" e os itens do orçamento dela? As despesas ligadas a ela ficam "sem etapa".`)) return;
+        executar(async () => ok(await sb.from('etapas').delete().eq('id', e.id)));
+      };
+      const moverEtapa = (e, dir) => {
+        const lista = data.etapas.filter(x => x.obra_id === e.obra_id).sort((a, b) => a.ordem - b.ordem);
+        const k = lista.findIndex(x => x.id === e.id), o = lista[k + dir];
+        if (!o) return;
+        executar(async () => {
+          lista.splice(k, 1); lista.splice(k + dir, 0, e);
+          for (const [i, x] of lista.entries()) if (x.ordem !== i + 1) ok(await sb.from('etapas').update({ ordem: i + 1 }).eq('id', x.id));
+        });
+      };
+      const salvarAvanco = (e) => {
+        const v = numBR(avancoEdit[e.id]);
+        if (!(v >= 0 && v <= 100)) return alert('Informe um percentual entre 0 e 100.');
+        executar(async () => { ok(await sb.rpc('atualizar_avanco', { p_etapa: e.id, p_avanco: v })); setAvancoEdit(a => { const n = { ...a }; delete n[e.id]; return n; }); });
+      };
+      // Colar do Excel: Etapa | Descrição | Unid | Qtd | Preço unit  (ou Etapa | Valor, ou Etapa | Descrição | Valor)
+      const lerColagem = (texto) => {
+        const linhas = []; let etapaAtual = '';
+        for (const bruta of texto.split(/\r?\n/)) {
+          if (!bruta.trim()) continue;
+          const c = bruta.split(bruta.includes('\t') ? '\t' : ';').map(x => x.trim());
+          let etapa = c[0] || etapaAtual, descricao, unidade = 'vb', qtd = 1, preco;
+          if (c.length >= 5) { descricao = c[1]; unidade = c[2] || 'vb'; qtd = numBR(c[3]); preco = numBR(c[4]); }
+          else if (c.length === 3 || c.length === 4) { descricao = c[1]; preco = numBR(c[c.length - 1]); }
+          else if (c.length === 2) { descricao = 'Valor global'; preco = numBR(c[1]); }
+          else continue;
+          if (!etapa || !(qtd >= 0) || !(preco >= 0) || Number.isNaN(preco)) continue;   // cabeçalho ou linha inválida
+          etapaAtual = etapa;
+          linhas.push({ etapa, descricao: descricao || 'Valor global', unidade, qtd, preco });
+        }
+        return linhas;
+      };
+      const importarColagem = async (obraId) => {
+        const linhas = lerColagem(colarTexto);
+        if (!linhas.length) return alert('Não encontrei linhas válidas. Copie do Excel as colunas Etapa, Descrição, Unidade, Quantidade e Preço unitário.');
+        const okS = await executar(async () => {
+          let ordem = Math.max(0, ...data.etapas.filter(x => x.obra_id === obraId).map(x => x.ordem));
+          const ids = {};
+          for (const l of linhas) {
+            const chave = l.etapa.toLowerCase();
+            if (!ids[chave]) {
+              const existe = data.etapas.find(x => x.obra_id === obraId && x.nome.toLowerCase() === chave);
+              ids[chave] = existe ? existe.id : ok(await sb.from('etapas').insert({ obra_id: obraId, nome: l.etapa, ordem: ++ordem }).select().single()).id;
+            }
+          }
+          const base = {};
+          const rows = linhas.map(l => { const eid = ids[l.etapa.toLowerCase()]; base[eid] = (base[eid] ?? data.etapaItens.filter(i => i.etapa_id === eid).length) + 1;
+            return { etapa_id: eid, descricao: l.descricao, unidade: l.unidade, qtd: l.qtd, preco_unit: r2(l.preco), ordem: base[eid] }; });
+          ok(await sb.from('etapa_itens').insert(rows));
+        });
+        if (okS) { setColarModal(false); setColarTexto(''); }
+      };
+
       // ---------- Medição de empreiteiro ----------
       const medRascunhos = data.medicoes.filter(m => m.status === 'Rascunho').length;
       const itensDoContrato = (cid) => data.contratoItens.filter(i => i.contrato_id === cid);
@@ -820,7 +956,7 @@
         return s + mi.qtd;
       }, 0);
       const abrirContrato = (c) => {
-        setContratoForm(c ? { id: c.id, obraId: c.obra_id, empreiteiro: c.empreiteiro, objeto: c.objeto, retencao: c.retencao_pct, status: c.status,
+        setContratoForm(c ? { id: c.id, obraId: c.obra_id, etapaId: c.etapa_id || '', empreiteiro: c.empreiteiro, objeto: c.objeto, retencao: c.retencao_pct, status: c.status,
             itens: itensDoContrato(c.id).map(i => ({ id: i.id, descricao: i.descricao, unidade: i.unidade, qtd: i.qtd, preco: i.preco_unit })) }
           : { obraId: primeiraObra(), empreiteiro: '', objeto: '', retencao: 5, status: 'Ativo', itens: [{ descricao: '', unidade: 'm²', qtd: '', preco: '' }] });
         setContratoModal(true);
@@ -835,7 +971,8 @@
         const ret = Number(f.retencao) || 0;
         if (ret < 0 || ret > 100) return alert('A retenção deve ficar entre 0 e 100%.');
         const okSalvo = await executar(async () => {
-          const reg = { obra_id: f.obraId, empreiteiro: f.empreiteiro.trim(), objeto: (f.objeto || '').trim(), retencao_pct: ret, status: f.status };
+          const reg = { obra_id: f.obraId, empreiteiro: f.empreiteiro.trim(), objeto: (f.objeto || '').trim(), retencao_pct: ret, status: f.status,
+                        etapa_id: data.etapas.some(x => x.id === f.etapaId && x.obra_id === f.obraId) ? f.etapaId : null };
           let id = f.id;
           if (id) ok(await sb.from('contratos').update(reg).eq('id', id));
           else id = ok(await sb.from('contratos').insert(reg).select().single()).id;
@@ -1109,6 +1246,7 @@
         { id: 'materiais', label: 'Controle de Materiais', icon: 'package', badge: alertasEstoque.length || null },
         { id: 'dashboard', label: 'Painel Principal', icon: 'dashboard' },
         { id: 'obras', label: 'Cadastro de Obras', icon: 'building' },
+        { id: 'orcamento', label: 'Orçamento e Cronograma', icon: 'calendar', badge: etapasAtrasadas || null },
         { id: 'diario', label: 'Diário de Obra', icon: 'book' },
         { id: 'compras', label: 'Compras & Fornecedores', icon: 'cart' },
         { id: 'financeiro', label: 'Controle Financeiro', icon: 'dollar' },
@@ -2008,6 +2146,214 @@
                 );
               })()}
 
+              {aba === 'orcamento' && (() => {
+                const eng = user.perfil === 'Engenheiro';
+                const hoje = hojeISO();
+                const obraId = (selectedObra !== 'ALL' ? selectedObra : (orcObra || data.obras.find(o => o.status === 'Em andamento')?.id || data.obras[0]?.id)) || '';
+                const etapas = data.etapas.filter(e => e.obra_id === obraId).sort((a, b) => a.ordem - b.ordem);
+                const vEt = Object.fromEntries(etapas.map(e => [e.id, valorEtapa(e.id)]));
+                const orcado = etapas.reduce((s, e) => s + vEt[e.id], 0);
+                const desps = data.despesas.filter(d => d.obraId === obraId);
+                const realEt = (id) => desps.filter(d => d.etapaId === id).reduce((s, d) => s + d.valor, 0);
+                const semEtapa = desps.filter(d => !etapas.some(e => e.id === d.etapaId)).reduce((s, d) => s + d.valor, 0);
+                const realizado = desps.reduce((s, d) => s + d.valor, 0);
+                const peso = (e) => eng && orcado > 0 ? vEt[e.id] : (e.inicio && e.fim ? diasEntre(e.inicio, e.fim) + 1 : 1);
+                const somaPeso = etapas.reduce((s, e) => s + peso(e), 0) || 1;
+                const avGeral = etapas.length ? etapas.reduce((s, e) => s + peso(e) * e.avanco, 0) / somaPeso : 0;
+                const datadas = etapas.filter(e => e.inicio && e.fim);
+                const plGeral = datadas.length ? etapas.reduce((s, e) => s + peso(e) * (planejadoEm(e, hoje) ?? 0), 0) / somaPeso : null;
+                const ini = datadas.length ? datadas.reduce((m, e) => e.inicio < m ? e.inicio : m, datadas[0].inicio) : null;
+                const fim = datadas.length ? datadas.reduce((m, e) => e.fim > m ? e.fim : m, datadas[0].fim) : null;
+                const meses = ini ? mesesEntre(ini, fim) : [];
+                const g0 = ini ? ini.slice(0, 7) + '-01' : null, gTot = ini ? diasEntre(g0, fimDoMes(meses[meses.length - 1])) + 1 : 1;
+                const pos = (d) => (diasEntre(g0, d) / gTot) * 100;
+                const corSit = { 'Concluída': 'bg-emerald-100 text-emerald-800', 'Atrasada': 'bg-red-100 text-red-800', 'Em andamento': 'bg-sky-100 text-sky-800', 'Não iniciada': 'bg-slate-100 text-slate-600', 'Sem datas': 'bg-slate-100 text-slate-500' };
+                const pct = (v) => v.toFixed(0) + '%';
+                const fmtK = (v) => v ? Math.round(v).toLocaleString('pt-BR') : '—';
+                // físico-financeiro
+                const prevMes = {}; datadas.forEach(e => { const d = distribuirPorMes(vEt[e.id], e.inicio, e.fim); prevMes[e.id] = d; });
+                const totPrev = meses.map(m => datadas.reduce((s, e) => s + (prevMes[e.id][m] || 0), 0));
+                const mesDesp = (d) => (d.vencimento || hoje).slice(0, 7);
+                const realMes = meses.map(m => desps.filter(d => mesDesp(d) === m).reduce((s, d) => s + d.valor, 0));
+                const antes = desps.filter(d => meses.length && mesDesp(d) < meses[0]).reduce((s, d) => s + d.valor, 0);
+                const acum = (arr, base = 0) => { let a = base; return arr.map(v => (a += v)); };
+                const prevAc = acum(totPrev), realAc = acum(realMes, antes);
+                const mesHoje = hoje.slice(0, 7);
+                // valor agregado: orçado × avanço físico registrado até o fim de cada mês
+                const agregado = meses.map(m => etapas.reduce((s, e) => {
+                  const hs = data.avancoHist.filter(h => h.etapa_id === e.id && h.dia <= fimDoMes(m));
+                  return s + vEt[e.id] * (hs.length ? hs[hs.length - 1].avanco : 0) / 100;
+                }, 0));
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Orçamento e cronograma</h3>
+                        <p className="text-xs text-slate-500">{eng ? 'Etapas com valores e datas → cronograma físico-financeiro, previsto x realizado e curva S.' : 'Cronograma das etapas. Atualize o avanço físico de cada uma.'}</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {selectedObra === 'ALL' && (
+                          <select value={obraId} onChange={e => setOrcObra(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold">
+                            {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+                          </select>
+                        )}
+                        {eng && obraId && <button type="button" onClick={() => { setColarTexto(''); setColarModal(true); }} className="px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100">Colar do Excel</button>}
+                        {eng && obraId && <button type="button" onClick={() => abrirEtapa(null, obraId)} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Nova etapa</button>}
+                      </div>
+                    </div>
+
+                    {etapas.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center text-slate-400 text-sm">
+                        {eng ? <>Nenhuma etapa nesta obra. Clique em <b>Nova etapa</b> ou cole o orçamento com <b>Colar do Excel</b>.</> : 'O Engenheiro ainda não montou o cronograma desta obra.'}
+                      </div>
+                    ) : (<>
+                      <div className={`grid grid-cols-1 sm:grid-cols-2 ${eng ? 'lg:grid-cols-4' : ''} gap-3`}>
+                        {eng && <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Orçado</p><p className="text-xl font-extrabold">{formatBRL(orcado)}</p></div>}
+                        {eng && <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Realizado (lançado)</p><p className="text-xl font-extrabold">{formatBRL(realizado)}</p><p className="text-xs text-slate-500">{orcado ? pct(realizado / orcado * 100) + ' do orçado' : ''}</p></div>}
+                        <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Avanço físico</p><p className="text-xl font-extrabold">{pct(avGeral)}</p>{plGeral !== null && <p className="text-xs text-slate-500">previsto para hoje: {pct(plGeral)}</p>}</div>
+                        <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Prazo</p><p className="text-xl font-extrabold">{fim ? fmtData(fim) : '—'}</p><p className="text-xs text-slate-500">{fim ? (diasEntre(hoje, fim) >= 0 ? `faltam ${diasEntre(hoje, fim)} dias` : `terminou há ${-diasEntre(hoje, fim)} dias`) : 'defina as datas das etapas'}</p></div>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-3 overflow-x-auto">
+                        <h4 className="font-bold text-slate-800">Cronograma</h4>
+                        <div className="min-w-[760px]">
+                          {meses.length > 0 && (
+                            <div className="flex text-[10px] font-bold uppercase text-slate-400 pl-56 pr-44">
+                              <div className="relative flex-1 h-4">
+                                {meses.map(m => <span key={m} className="absolute border-l border-slate-200 pl-1" style={{ left: pos(m + '-01') + '%' }}>{NOMES_MES[Number(m.slice(5)) - 1].slice(0, 3)}/{m.slice(2, 4)}</span>)}
+                              </div>
+                            </div>
+                          )}
+                          {etapas.map((e, k) => {
+                            const sit = situacaoEtapa(e, hoje); const pl = planejadoEm(e, hoje);
+                            return (
+                              <div key={e.id} className="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">
+                                <div className="w-56 shrink-0 pr-2">
+                                  <p className="text-sm font-semibold text-slate-800 truncate" title={e.nome}>{k + 1}. {e.nome}</p>
+                                  <p className="text-[11px] text-slate-500">{e.inicio ? `${fmtData(e.inicio)} a ${fmtData(e.fim)}` : 'sem datas'}{eng && vEt[e.id] ? ` · ${formatBRL(vEt[e.id])}` : ''}</p>
+                                </div>
+                                <div className="relative flex-1 h-7 bg-slate-50 rounded">
+                                  {meses.map(m => <span key={m} className="absolute top-0 bottom-0 border-l border-slate-200" style={{ left: pos(m + '-01') + '%' }} />)}
+                                  {e.inicio && e.fim && (
+                                    <div className="absolute top-1 bottom-1 rounded bg-slate-300 overflow-hidden" style={{ left: pos(e.inicio) + '%', width: Math.max(0.8, (diasEntre(e.inicio, e.fim) + 1) / gTot * 100) + '%' }} title={`Avanço ${pct(e.avanco)}${pl !== null ? ` · previsto hoje ${pct(pl)}` : ''}`}>
+                                      <div className={`h-full ${sit === 'Atrasada' ? 'bg-red-500' : 'bg-emerald-500'}`} style={{ width: e.avanco + '%' }} />
+                                    </div>
+                                  )}
+                                  {ini && hoje >= g0 && hoje <= fimDoMes(meses[meses.length - 1]) && <span className="absolute -top-1 -bottom-1 border-l-2 border-amber-500" style={{ left: pos(hoje) + '%' }} title="Hoje" />}
+                                </div>
+                                <div className="w-44 shrink-0 flex items-center gap-1 justify-end">
+                                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${corSit[sit]}`}>{sit}</span>
+                                  {can('orcamento.avanco') ? (
+                                    <span className="flex items-center gap-1">
+                                      <input type="number" min="0" max="100" step="1" value={avancoEdit[e.id] ?? e.avanco} onChange={ev => setAvancoEdit({ ...avancoEdit, [e.id]: ev.target.value })} className="w-14 border rounded px-1 py-0.5 text-xs text-right" aria-label={`Avanço de ${e.nome}`} />
+                                      <span className="text-xs">%</span>
+                                      {avancoEdit[e.id] !== undefined && Number(avancoEdit[e.id]) !== e.avanco && <button type="button" onClick={() => salvarAvanco(e)} className="text-[10px] font-bold bg-slate-900 text-white rounded px-1.5 py-1">OK</button>}
+                                    </span>
+                                  ) : <span className="text-xs font-bold">{pct(e.avanco)}</span>}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[11px] text-slate-500">Barra cinza = prazo da etapa; parte colorida = avanço físico (vermelha quando está mais de 10 pontos atrás do previsto). Linha laranja = hoje.</p>
+                      </div>
+
+                      {eng && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                          <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Previsto x realizado por etapa</h4></div>
+                          <table className="w-full text-sm text-left">
+                            <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                              <tr><th className="px-4 py-3">Etapa</th><th className="px-4 py-3 text-right">Orçado</th><th className="px-4 py-3 text-right">Realizado</th><th className="px-4 py-3 text-right">Saldo</th><th className="px-4 py-3 text-right">% gasto</th><th className="px-4 py-3 text-right">Avanço físico</th><th className="px-4 py-3">Ações</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {etapas.map((e, k) => { const r = realEt(e.id), o = vEt[e.id], g = o ? r / o * 100 : (r ? 100 : 0); const alerta = r > o || g - e.avanco > 10; return (
+                                <tr key={e.id}>
+                                  <td className="px-4 py-2 font-semibold">{e.nome}</td>
+                                  <td className="px-4 py-2 text-right">{formatBRL(o)}</td>
+                                  <td className="px-4 py-2 text-right">{formatBRL(r)}</td>
+                                  <td className={`px-4 py-2 text-right ${o - r < 0 ? 'text-red-700 font-bold' : ''}`}>{formatBRL(o - r)}</td>
+                                  <td className={`px-4 py-2 text-right ${alerta ? 'text-red-700 font-bold' : ''}`}>{pct(g)}{alerta && <span className="block text-[10px] font-semibold">{r > o ? 'acima do orçado' : 'gasto à frente da obra'}</span>}</td>
+                                  <td className="px-4 py-2 text-right">{pct(e.avanco)}</td>
+                                  <td className="px-4 py-2 whitespace-nowrap">
+                                    <BtnAcao onClick={() => abrirEtapa(e)}>Editar</BtnAcao>
+                                    <button type="button" title="Subir" disabled={k === 0} onClick={() => moverEtapa(e, -1)} className="text-xs px-1.5 disabled:opacity-30">▲</button>
+                                    <button type="button" title="Descer" disabled={k === etapas.length - 1} onClick={() => moverEtapa(e, 1)} className="text-xs px-1.5 disabled:opacity-30">▼</button>
+                                    <BtnAcao perigo onClick={() => excluirEtapa(e)}>Excluir</BtnAcao>
+                                  </td>
+                                </tr>
+                              ); })}
+                              {semEtapa > 0 && <tr className="text-slate-500"><td className="px-4 py-2 italic">Despesas sem etapa (folha, compras…)</td><td className="px-4 py-2 text-right">—</td><td className="px-4 py-2 text-right">{formatBRL(semEtapa)}</td><td colSpan={4} className="px-4 py-2 text-xs">Ligue a despesa a uma etapa em <b>Financeiro → Editar</b>.</td></tr>}
+                              <tr className="bg-slate-50 font-bold"><td className="px-4 py-2">Total</td><td className="px-4 py-2 text-right">{formatBRL(orcado)}</td><td className="px-4 py-2 text-right">{formatBRL(realizado)}</td><td className="px-4 py-2 text-right">{formatBRL(orcado - realizado)}</td><td className="px-4 py-2 text-right">{orcado ? pct(realizado / orcado * 100) : '—'}</td><td className="px-4 py-2 text-right">{pct(avGeral)}</td><td /></tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {eng && meses.length > 0 && (
+                        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                          <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Cronograma físico-financeiro (R$)</h4><p className="text-xs text-slate-500">Valor de cada etapa distribuído pelos meses, proporcional aos dias. Realizado = despesas da obra pelo mês de vencimento.</p></div>
+                          <table className="text-xs text-right whitespace-nowrap">
+                            <thead className="bg-slate-50 text-slate-500 uppercase font-bold">
+                              <tr><th className="px-3 py-2 text-left sticky left-0 bg-slate-50">Etapa</th>{meses.map(m => <th key={m} className={`px-3 py-2 ${m === mesHoje ? 'text-amber-700' : ''}`}>{NOMES_MES[Number(m.slice(5)) - 1].slice(0, 3)}/{m.slice(2, 4)}</th>)}<th className="px-3 py-2">Total</th></tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {datadas.map(e => <tr key={e.id}><td className="px-3 py-1.5 text-left font-semibold sticky left-0 bg-white">{e.nome}</td>{meses.map(m => <td key={m} className="px-3 py-1.5">{fmtK(prevMes[e.id][m])}</td>)}<td className="px-3 py-1.5 font-bold">{fmtK(vEt[e.id])}</td></tr>)}
+                              <tr className="bg-slate-50 font-bold"><td className="px-3 py-1.5 text-left sticky left-0 bg-slate-50">Previsto no mês</td>{totPrev.map((v, i) => <td key={i} className="px-3 py-1.5">{fmtK(v)}</td>)}<td className="px-3 py-1.5">{fmtK(totPrev.reduce((a, b) => a + b, 0))}</td></tr>
+                              <tr><td className="px-3 py-1.5 text-left sticky left-0 bg-white">Previsto acumulado</td>{prevAc.map((v, i) => <td key={i} className="px-3 py-1.5">{fmtK(v)}</td>)}<td /></tr>
+                              <tr className="font-bold"><td className="px-3 py-1.5 text-left sticky left-0 bg-white">Realizado no mês</td>{realMes.map((v, i) => <td key={i} className="px-3 py-1.5">{meses[i] > mesHoje && !v ? '' : fmtK(v)}</td>)}<td className="px-3 py-1.5">{fmtK(realizado)}</td></tr>
+                              <tr><td className="px-3 py-1.5 text-left sticky left-0 bg-white">Realizado acumulado</td>{realAc.map((v, i) => <td key={i} className={`px-3 py-1.5 ${v > prevAc[i] && meses[i] <= mesHoje ? 'text-red-700 font-bold' : ''}`}>{meses[i] > mesHoje ? '' : fmtK(v)}</td>)}<td /></tr>
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {eng && meses.length > 1 && orcado > 0 && (() => {
+                        const W = 760, H = 260, L = 64, R = 120, T = 16, B = 32;
+                        const n = meses.length, x = (i) => L + (i / (n - 1)) * (W - L - R);
+                        const ate = meses.filter(m => m <= mesHoje).length;
+                        const maxV = Math.max(orcado, ...realAc.slice(0, ate), 1);
+                        const y = (v) => T + (1 - v / maxV) * (H - T - B);
+                        const linha = (arr, k) => arr.slice(0, k).map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+                        const series = [
+                          { nome: 'Previsto', cor: '#2563eb', arr: prevAc, k: n, tracejado: true },
+                          { nome: 'Gasto', cor: '#d97706', arr: realAc, k: ate },
+                          { nome: 'Executado', cor: '#059669', arr: agregado, k: ate },
+                        ];
+                        const ticks = [0, 0.25, 0.5, 0.75, 1].map(f => f * maxV);
+                        const hv = curvaHover;
+                        return (
+                          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-2">
+                            <h4 className="font-bold text-slate-800">Curva S — acumulado da obra</h4>
+                            <p className="text-xs text-slate-500"><b>Previsto</b>: pelo cronograma. <b>Gasto</b>: despesas lançadas. <b>Executado</b>: orçado × avanço físico informado. Gasto acima do executado = obra custando mais que o andamento.</p>
+                            <div className="flex flex-wrap gap-4 text-xs">
+                              {series.map(sr => <span key={sr.nome} className="flex items-center gap-1.5 text-slate-700"><svg width="22" height="8"><line x1="0" y1="4" x2="22" y2="4" stroke={sr.cor} strokeWidth="2" strokeDasharray={sr.tracejado ? '5 3' : undefined} /></svg>{sr.nome}</span>)}
+                            </div>
+                            <div className="relative overflow-x-auto">
+                              <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[560px]" role="img" aria-label="Curva S com previsto, gasto e executado acumulados por mês"
+                                onMouseLeave={() => setCurvaHover(null)}
+                                onMouseMove={(ev) => { const r = ev.currentTarget.getBoundingClientRect(); const px = (ev.clientX - r.left) / r.width * W; const i = Math.round((px - L) / (W - L - R) * (n - 1)); setCurvaHover(i >= 0 && i < n ? i : null); }}>
+                                {ticks.map((t, i) => <g key={i}><line x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="#e2e8f0" strokeWidth="1" /><text x={L - 6} y={y(t) + 3} textAnchor="end" fontSize="10" fill="#64748b">{t >= 1000 ? Math.round(t / 1000).toLocaleString('pt-BR') + ' mil' : Math.round(t)}</text></g>)}
+                                {meses.map((m, i) => (n <= 14 || i % Math.ceil(n / 12) === 0) && <text key={m} x={x(i)} y={H - 10} textAnchor="middle" fontSize="10" fill="#64748b">{NOMES_MES[Number(m.slice(5)) - 1].slice(0, 3)}/{m.slice(2, 4)}</text>)}
+                                {series.map(sr => sr.k > 0 && <path key={sr.nome} d={linha(sr.arr, sr.k)} fill="none" stroke={sr.cor} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray={sr.tracejado ? '6 4' : undefined} />)}
+                                {series.map(sr => sr.k > 0 && <g key={sr.nome + 'r'}><circle cx={x(sr.k - 1)} cy={y(sr.arr[sr.k - 1])} r="4" fill={sr.cor} stroke="#fff" strokeWidth="2" /><text x={x(sr.k - 1) + 8} y={y(sr.arr[sr.k - 1]) + 4} fontSize="11" fill="#334155" fontWeight="600">{sr.nome}</text></g>)}
+                                {hv !== null && <line x1={x(hv)} x2={x(hv)} y1={T} y2={H - B} stroke="#94a3b8" strokeWidth="1" />}
+                                {hv !== null && series.map(sr => hv < sr.k && <circle key={sr.nome + 'h'} cx={x(hv)} cy={y(sr.arr[hv])} r="4" fill={sr.cor} stroke="#fff" strokeWidth="2" />)}
+                              </svg>
+                              {hv !== null && (
+                                <div className="absolute top-2 bg-slate-900 text-white text-xs rounded-lg px-3 py-2 pointer-events-none shadow-lg" style={{ left: `min(calc(${x(hv) / W * 100}% + 12px), calc(100% - 180px))` }}>
+                                  <p className="font-bold mb-1">{NOMES_MES[Number(meses[hv].slice(5)) - 1]} de {meses[hv].slice(0, 4)}</p>
+                                  {series.map(sr => hv < sr.k && <p key={sr.nome}><span className="inline-block w-2 h-2 rounded-full mr-1.5" style={{ background: sr.cor }} />{sr.nome}: {formatBRL(sr.arr[hv])}</p>)}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </>)}
+                  </div>
+                );
+              })()}
+
               {aba === 'medicoes' && (() => {
                 const contratos = data.contratos.filter(c => selectedObra === 'ALL' || c.obra_id === selectedObra);
                 const c = contratos.find(x => x.id === contratoSel) || contratos.find(x => x.status === 'Ativo') || contratos[0];
@@ -2630,6 +2976,12 @@
                   <select value={novaDespesaForm.obraId} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, obraId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
                     {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                   </select>
+                  {data.etapas.some(e => e.obra_id === novaDespesaForm.obraId) && (
+                    <select value={novaDespesaForm.etapaId || ''} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, etapaId: e.target.value })} className="w-full border rounded-lg px-3 py-2">
+                      <option value="">Etapa do orçamento: nenhuma</option>
+                      {data.etapas.filter(e => e.obra_id === novaDespesaForm.obraId).map(e => <option key={e.id} value={e.id}>Etapa: {e.nome}</option>)}
+                    </select>
+                  )}
                   <input type="text" placeholder="Descrição da Despesa" value={novaDespesaForm.descricao} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, descricao: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <select value={novaDespesaForm.categoria} onChange={e => setNovaDespesaForm({ ...novaDespesaForm, categoria: e.target.value })} className="w-full border rounded-lg px-3 py-2">
                     <option value="Material">Material</option>
@@ -2697,6 +3049,77 @@
             </div>
           )}
 
+          {etapaModal && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-3xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                <h3 className="text-lg font-extrabold">{etapaForm.id ? 'Editar etapa' : 'Nova etapa'} — {getObraNome(etapaForm.obraId)}</h3>
+                <form onSubmit={salvarEtapa} className="space-y-3 text-sm">
+                  <label className="block text-xs font-bold uppercase text-slate-500">Nome da etapa
+                    <input value={etapaForm.nome} onChange={e => setEtapaForm({ ...etapaForm, nome: e.target.value })} placeholder="Ex.: Fundação, Estrutura, Alvenaria…" className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" required />
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="block text-xs font-bold uppercase text-slate-500">Início
+                      <input type="date" value={etapaForm.inicio} onChange={e => setEtapaForm({ ...etapaForm, inicio: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" />
+                    </label>
+                    <label className="block text-xs font-bold uppercase text-slate-500">Fim
+                      <input type="date" value={etapaForm.fim} onChange={e => setEtapaForm({ ...etapaForm, fim: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" />
+                    </label>
+                  </div>
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-slate-500">Itens do orçamento</p>
+                    <div className="hidden sm:grid grid-cols-12 gap-2 text-[10px] font-bold uppercase text-slate-400 px-1"><span className="col-span-5">Descrição</span><span className="col-span-2">Unid.</span><span className="col-span-2">Quantidade</span><span className="col-span-2">Preço unit. (R$)</span></div>
+                    {etapaForm.itens.map((it, k) => {
+                      const set = (campo, v) => setEtapaForm({ ...etapaForm, itens: etapaForm.itens.map((x, j) => j === k ? { ...x, [campo]: v } : x) });
+                      return (
+                        <div key={k} className="grid grid-cols-12 gap-2 items-center">
+                          <input value={it.descricao} onChange={e => set('descricao', e.target.value)} placeholder="Ex.: Concreto fck 30 MPa" className="col-span-12 sm:col-span-5 border rounded-lg px-2 py-2" />
+                          <input value={it.unidade} onChange={e => set('unidade', e.target.value)} placeholder="m³" className="col-span-3 sm:col-span-2 border rounded-lg px-2 py-2" />
+                          <input inputMode="decimal" value={it.qtd} onChange={e => set('qtd', e.target.value)} placeholder="Qtd" className="col-span-4 sm:col-span-2 border rounded-lg px-2 py-2" />
+                          <input inputMode="decimal" value={it.preco} onChange={e => set('preco', e.target.value)} placeholder="Preço" className="col-span-4 sm:col-span-2 border rounded-lg px-2 py-2" />
+                          <button type="button" title="Remover item" onClick={() => setEtapaForm({ ...etapaForm, itens: etapaForm.itens.filter((_, j) => j !== k) })} className="col-span-1 text-red-600 font-bold text-lg">×</button>
+                        </div>
+                      );
+                    })}
+                    <div className="flex justify-between items-center">
+                      <button type="button" onClick={() => setEtapaForm({ ...etapaForm, itens: [...etapaForm.itens, { descricao: '', unidade: 'un', qtd: '', preco: '' }] })} className="text-xs font-bold text-amber-700 hover:underline">+ Adicionar item</button>
+                      <span className="text-sm">Total da etapa: <b>{formatBRL(etapaForm.itens.reduce((s, i) => s + (numBR(i.qtd) || 0) * (numBR(i.preco) || 0), 0))}</b></span>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setEtapaModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar etapa</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {colarModal && (() => {
+            const obraId = (selectedObra !== 'ALL' ? selectedObra : (orcObra || data.obras.find(o => o.status === 'Em andamento')?.id || data.obras[0]?.id)) || '';
+            const linhas = lerColagem(colarTexto);
+            const etapasN = [...new Set(linhas.map(l => l.etapa))];
+            return (
+              <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-2xl max-w-3xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto text-sm">
+                  <h3 className="text-lg font-extrabold">Colar orçamento do Excel — {getObraNome(obraId)}</h3>
+                  <p className="text-slate-600">No Excel, selecione as colunas <b>Etapa · Descrição · Unidade · Quantidade · Preço unitário</b>, copie (Ctrl+C) e cole aqui. Também aceita só <b>Etapa · Valor</b>. Etapa em branco repete a de cima; o cabeçalho é ignorado.</p>
+                  <textarea rows="8" value={colarTexto} onChange={e => setColarTexto(e.target.value)} placeholder={'Fundação\tEstaca hélice contínua\tm\t320\t95,00\nFundação\tBloco de coroamento\tm³\t42\t1.150,00\nEstrutura\tConcreto fck 30\tm³\t180\t620,00'} className="w-full border rounded-lg px-3 py-2 font-mono text-xs" />
+                  {linhas.length > 0 && (
+                    <div className="bg-slate-50 rounded-xl p-3 space-y-1">
+                      <p className="font-bold">Prévia: {linhas.length} item(ns) em {etapasN.length} etapa(s) — total {formatBRL(linhas.reduce((s, l) => s + l.qtd * l.preco, 0))}</p>
+                      {etapasN.map(n => <p key={n} className="text-xs text-slate-600">{n}: {linhas.filter(l => l.etapa === n).length} item(ns), {formatBRL(linhas.filter(l => l.etapa === n).reduce((s, l) => s + l.qtd * l.preco, 0))}{data.etapas.some(x => x.obra_id === obraId && x.nome.toLowerCase() === n.toLowerCase()) ? ' (soma à etapa existente)' : ' (nova)'}</p>)}
+                    </div>
+                  )}
+                  <p className="text-xs text-slate-500">Depois, abra cada etapa em <b>Editar</b> para pôr as datas de início e fim.</p>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={() => setColarModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="button" disabled={enviando || !linhas.length} onClick={() => importarColagem(obraId)} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Importar</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           {contratoModal && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
               <div className="bg-white rounded-2xl max-w-3xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
@@ -2711,6 +3134,14 @@
                         {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                       </select>
                     </label>
+                    {data.etapas.some(x => x.obra_id === contratoForm.obraId) && (
+                      <label className="block text-xs font-bold uppercase text-slate-500">Etapa do orçamento
+                        <select value={contratoForm.etapaId || ''} onChange={e => setContratoForm({ ...contratoForm, etapaId: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900">
+                          <option value="">Nenhuma</option>
+                          {data.etapas.filter(x => x.obra_id === contratoForm.obraId).map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}
+                        </select>
+                      </label>
+                    )}
                     <label className="block text-xs font-bold uppercase text-slate-500">Objeto / serviço
                       <input value={contratoForm.objeto} onChange={e => setContratoForm({ ...contratoForm, objeto: e.target.value })} placeholder="Ex.: Alvenaria do bloco A" className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
                     </label>
