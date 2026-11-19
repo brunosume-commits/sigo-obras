@@ -449,6 +449,16 @@
       const [modeloForm, setModeloForm] = useState(null);
       const [filtroPend, setFiltroPend] = useState('abertas');
       const [portalObra, setPortalObra] = useState('');
+      const [souAdmin, setSouAdmin] = useState(false);
+      useEffect(() => {
+        if (user?.perfil !== 'Engenheiro') { setSouAdmin(false); return; }
+        sb.rpc('sou_administrador', {}).then(({ data: r }) => setSouAdmin(r === true), () => setSouAdmin(false));
+      }, [user?.id, user?.perfil]);
+      const apagarExemplo = (obra) => {
+        if (!confirm(`Apagar a obra "${obra.nome}" e tudo que foi criado com ela (funcionários, estoque, compras, despesas, diário, orçamento, medições, cotações e pendências de exemplo)?\n\nSeus dados reais não são tocados. Não dá para desfazer.`)) return;
+        if (selectedObra === obra.id) setSelectedObra('ALL');
+        executar(async () => ok(await sb.rpc('apagar_obra_exemplo', { p_obra: obra.id })));
+      };
       const [portalFotos, setPortalFotos] = useState({});
       const [fotoGrande, setFotoGrande] = useState(null);
       const [saldoForm, setSaldoForm] = useState(null);
@@ -1939,6 +1949,7 @@
                           <div className="pt-2 border-t border-slate-100 flex justify-end no-print">
                             <BtnAcao onClick={() => abrirObra(obra)}>Editar</BtnAcao>
                             <BtnAcao perigo onClick={() => excluirObra(obra)}>Excluir</BtnAcao>
+                            {souAdmin && obra.nome.endsWith('(exemplo)') && <BtnAcao perigo onClick={() => apagarExemplo(obra)}>Apagar exemplo</BtnAcao>}
                           </div>
                         )}
                       </div>
