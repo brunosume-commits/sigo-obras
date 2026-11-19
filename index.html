@@ -72,6 +72,7 @@
         search: <><circle cx="11" cy="11" r="8"/><line x1="21" x2="16.65" y1="21" y2="16.65"/></>,
         chevronLeft: <><polyline points="15 18 9 12 15 6"/></>,
         chevronRight: <><polyline points="9 18 15 12 9 6"/></>,
+        fileText: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" x2="16" y1="13" y2="13"/><line x1="8" x2="16" y1="17" y2="17"/></>,
         print: <><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect width="12" height="8" x="6" y="14"/></>
       };
       return (
@@ -102,6 +103,51 @@
     const NOMES_MES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
     const diasDoMes = (mes) => { const [a, m] = mes.split('-').map(Number); return new Date(a, m, 0).getDate(); };
     const semAcento = (t) => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+
+    // ---------- Nota fiscal eletrônica (XML da NF-e) ----------
+    const lerXmlNFe = (texto) => {
+      const doc = new DOMParser().parseFromString(String(texto || '').replace(/^\uFEFF/, ''), 'application/xml');
+      if (doc.getElementsByTagName('parsererror').length) throw new Error('O arquivo não é um XML válido. Use o arquivo .xml da nota (não o PDF do DANFE).');
+      const inf = doc.getElementsByTagName('infNFe')[0];
+      if (!inf) throw new Error('Este XML não é de uma NF-e. Use o arquivo .xml que o fornecedor envia junto com o DANFE.');
+      const g = (el, tag) => el ? el.getElementsByTagName(tag)[0] : null;
+      const tx = (el, tag) => { const x = g(el, tag); return x ? x.textContent.trim() : ''; };
+      const nm = (el, tag) => Number(tx(el, tag)) || 0;
+      let chave = (inf.getAttribute('Id') || '').replace(/\D/g, '');
+      if (chave.length !== 44) chave = tx(doc, 'chNFe').replace(/\D/g, '');
+      const ide = g(inf, 'ide'), emit = g(inf, 'emit'), dest = g(inf, 'dest'), tot = g(inf, 'ICMSTot');
+      const avisos = [];
+      const cStat = tx(g(doc, 'infProt'), 'cStat');
+      if (!cStat) avisos.push('O XML não traz o protocolo de autorização da SEFAZ. Confira se a nota foi mesmo autorizada.');
+      else if (!['100', '150'].includes(cStat)) avisos.push(`A SEFAZ não autorizou esta nota (situação ${cStat}: ${tx(g(doc, 'infProt'), 'xMotivo')}).`);
+      if (tx(ide, 'tpNF') === '0') avisos.push('É uma nota de ENTRADA emitida pelo próprio fornecedor (ex.: devolução). Confira antes de lançar.');
+      const itens = [...inf.getElementsByTagName('det')].map((d, k) => {
+        const pr = g(d, 'prod');
+        return { k, codigo: tx(pr, 'cProd'), descricao: tx(pr, 'xProd'), ncm: tx(pr, 'NCM'), unidade: tx(pr, 'uCom'),
+                 qtd: nm(pr, 'qCom'), valorUnit: nm(pr, 'vUnCom'), valorTotal: nm(pr, 'vProd') };
+      });
+      if (!itens.length) throw new Error('A nota não tem itens.');
+      return {
+        chave, numero: tx(ide, 'nNF'), serie: tx(ide, 'serie'), emissao: (tx(ide, 'dhEmi') || tx(ide, 'dEmi')).slice(0, 10),
+        emitente: { cnpj: tx(emit, 'CNPJ') || tx(emit, 'CPF'), nome: tx(emit, 'xNome'), fantasia: tx(emit, 'xFant') },
+        destinatario: { doc: tx(dest, 'CNPJ') || tx(dest, 'CPF'), nome: tx(dest, 'xNome') },
+        valorTotal: nm(tot, 'vNF'), valorProdutos: nm(tot, 'vProd'), frete: nm(tot, 'vFrete'), desconto: nm(tot, 'vDesc'),
+        itens,
+        parcelas: [...inf.getElementsByTagName('dup')].map(d => ({ numero: tx(d, 'nDup'), vencimento: tx(d, 'dVenc'), valor: nm(d, 'vDup') })),
+        avisos,
+      };
+    };
+    const PALAVRAS_VAZIAS = new Set(['de', 'da', 'do', 'das', 'dos', 'com', 'para', 'e', 'em', 'a', 'o', 'n', 'no', 'x', 'ltda', 'me', 'epp', 'eireli', 'sa', 'cia', 'comercio', 'industria']);
+    const palavras = (t) => semAcento(t).replace(/(\w)-(\w)/g, '$1$2').replace(/[^a-z0-9]+/g, ' ').split(' ').filter(w => w && !PALAVRAS_VAZIAS.has(w));
+    const semelhanca = (a, b) => {
+      const A = new Set(palavras(a)), B = new Set(palavras(b));
+      if (!A.size || !B.size) return 0;
+      let c = 0; A.forEach(w => { if (B.has(w)) c++; });
+      return 2 * c / (A.size + B.size);
+    };
+    const UNID_EQUIV = { br: 'br', barra: 'br', barras: 'br', sc: 'sc', saco: 'sc', sacos: 'sc', m3: 'm3', 'm³': 'm3', un: 'un', und: 'un', unid: 'un', pc: 'un', 'pç': 'un', peca: 'un', kg: 'kg', m: 'm', mt: 'm', ml: 'm', par: 'par', pr: 'par', rl: 'rl', rolo: 'rl', lt: 'l', l: 'l', m2: 'm2', 'm²': 'm2', cx: 'cx', caixa: 'cx', t: 't', ton: 't' };
+    const mesmaUnidade = (a, b) => { const n = (u) => { const x = semAcento(u).replace(/[^a-z0-9²³]/g, ''); return UNID_EQUIV[x] || x; }; return n(a) === n(b); };
+    const fmtChave = (c) => String(c || '').replace(/(\d{4})(?=\d)/g, '$1 ');
 
     // Gráfico de barras horizontais simples (sem biblioteca)
     const BarrasH = ({ itens, formato = (v) => v, vazio = 'Sem dados para exibir.' }) => {
@@ -177,7 +223,7 @@
       'Almoxarife': {
         abaInicial: 'materiais',
         abas: ['materiais', 'obras', 'diario', 'qualidade', 'compras', 'epi', 'relatorios'],
-        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'fornecedor.gerir', 'compra.criar', 'compra.editar', 'compra.receber', 'cotacao.gerir', 'epi.entregar', 'epi.cancelar'],
+        acoes: ['mov.Entrada', 'mov.Saída', 'mov.Transferência', 'mov.estornar', 'material.gerir', 'fornecedor.gerir', 'compra.criar', 'compra.editar', 'compra.receber', 'cotacao.gerir', 'nota.lancar', 'epi.entregar', 'epi.cancelar'],
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
@@ -195,7 +241,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [], alertasDia: null, ultimoEnvio: null, notas: [], notaItens: [], nfeMapas: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -279,6 +325,7 @@
         if (ehErroRede({ message: msg })) { const e = new Error('Sem conexão com a internet. Esta operação precisa de internet; tente de novo quando a conexão voltar.'); e.rede = true; throw e; }
         if (/row-level security|permission denied|Sem permissão/i.test(msg)) throw new Error('Seu perfil não tem permissão para esta operação.');
         if (/violates foreign key/i.test(msg)) throw new Error('Este registro está vinculado a outros lançamentos e não pode ser excluído.');
+        if (/fornecedores_cnpj_unico/i.test(msg)) throw new Error('Já existe um fornecedor com este CNPJ.');
         if (/duplicate key.*codigo/i.test(msg)) throw new Error('Já existe um material com este código.');
         throw new Error(msg);
       }
@@ -334,9 +381,12 @@
         (eng || perfil === 'Mestre de Obras') ? sb.from('producao_funcionarios').select('*') : Promise.resolve({ data: [] }),
         eng ? sb.rpc('resumo_alertas', {}) : Promise.resolve({ data: null }),
         eng ? sb.from('envios_alertas').select('*').order('dia', { ascending: false }).limit(1) : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Almoxarife') ? sb.from('notas_fiscais').select('*').order('criado_em', { ascending: false }).limit(300) : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Almoxarife') ? sb.from('nfe_mapeamentos').select('*') : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs, alertasDia, envios] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs, alertasDia, envios, notas, nfeMapas] = (await Promise.all(consultas)).map(ok);
       const inspItens = inspecoes.length ? ok(await sb.from('inspecao_itens').select('*').in('inspecao_id', inspecoes.map(i => i.id)).order('ordem', { ascending: true })) : [];
+      const notaItens = notas.length ? ok(await sb.from('nota_itens').select('*').in('nota_id', notas.map(n => n.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
@@ -387,6 +437,9 @@
         servicos: servicos.map(x => ({ ...x, rup_ref: num(x.rup_ref) })),
         prodFuncs,
         alertasDia, ultimoEnvio: envios[0] || null,
+        notas: notas.map(n => ({ ...n, valor_total: num(n.valor_total), frete: num(n.frete), desconto: num(n.desconto) })),
+        notaItens: notaItens.map(i => ({ ...i, qtd_nf: num(i.qtd_nf), valor_unit: num(i.valor_unit), valor_total: num(i.valor_total), fator: num(i.fator), qtd_estoque: i.qtd_estoque === null ? null : num(i.qtd_estoque) })),
+        nfeMapas,
       };
     }
 
@@ -455,6 +508,8 @@
       const [contratoSel, setContratoSel] = useState('');
       const [orcObra, setOrcObra] = useState('');
       const [cotForm, setCotForm] = useState(null);
+      const [nfForm, setNfForm] = useState(null);       // importação do XML da NF-e
+      const [notaAberta, setNotaAberta] = useState(null);
       const [receitaForm, setReceitaForm] = useState(null);
       const [inspForm, setInspForm] = useState(null);
       const [inspVer, setInspVer] = useState(null);
@@ -726,7 +781,7 @@
         setNovoFuncModal(true);
       };
       const abrirFornecedor = (forn) => {
-        setFornForm(forn ? { ...forn } : { nome: '', contato: '', categoria: '' });
+        setFornForm(forn ? { ...forn, cnpj: forn.cnpj || '' } : { nome: '', contato: '', categoria: '', cnpj: '' });
         setFornModal(true);
       };
       const abrirMov = (tipo) => {
@@ -801,7 +856,7 @@
 
       const salvarFornecedor = async (e) => {
         e.preventDefault();
-        const reg = { nome: fornForm.nome.trim(), contato: fornForm.contato.trim(), categoria: fornForm.categoria.trim() };
+        const reg = { nome: fornForm.nome.trim(), contato: fornForm.contato.trim(), categoria: fornForm.categoria.trim(), cnpj: (fornForm.cnpj || '').replace(/\D/g, '') };
         if (await executar(async () => ok(fornForm.id
           ? await sb.from('fornecedores').update(reg).eq('id', fornForm.id)
           : await sb.from('fornecedores').insert(reg)))) setFornModal(false);
@@ -1106,6 +1161,98 @@
             forns: data.cotacaoForns.filter(f => f.cotacao_id === c.id).map(f => f.fornecedor_id) }
           : { obraId: primeiraObra(), titulo: '', obs: '', itens: [{ materialId: data.materiais[0]?.id || '', qtd: '' }], forns: data.fornecedores.slice(0, 3).map(f => f.id) });
       };
+      // ---------- Nota fiscal: importação do XML da NF-e ----------
+      const sugerirCompraNF = (materialId, obraId, fornId, qtd, usadas) => {
+        if (!materialId) return '';
+        const c = data.compras
+          .filter(x => x.materialId === materialId && x.obraId === obraId && (x.status === 'Solicitado' || x.status === 'Comprado') && !usadas.has(x.id))
+          .sort((a, b) => ((b.fornecedorId === fornId) - (a.fornecedorId === fornId)) || (Math.abs(a.qtd - qtd) - Math.abs(b.qtd - qtd)))[0];
+        if (c) usadas.add(c.id);
+        return c ? c.id : '';
+      };
+      const montarItensNF = (nf, obraId, fornId) => {
+        const usadas = new Set();
+        return nf.itens.map(it => {
+          const mapa = fornId && data.nfeMapas.find(m => m.fornecedor_id === fornId && m.codigo_forn === it.codigo);
+          let materialId = '', fator = 1, origem = '';
+          if (mapa && data.materiais.some(m => m.id === mapa.material_id)) { materialId = mapa.material_id; fator = Number(mapa.fator) || 1; origem = 'mapa'; }
+          else {
+            let best = null;
+            data.materiais.forEach(m => { const sc = semelhanca(it.descricao, m.nome); if (sc >= 0.5 && (!best || sc > best.sc)) best = { m, sc }; });
+            if (best) { materialId = best.m.id; origem = 'sugestao'; }
+          }
+          return { ...it, materialId, origem, fator: String(fator).replace('.', ','), compraId: sugerirCompraNF(materialId, obraId, fornId, it.qtd * fator, usadas) };
+        });
+      };
+      const abrirNotaFiscal = () => setNfForm({ passo: 'arquivo', erro: '' });
+      const lerArquivoNF = async (arquivo) => {
+        if (!arquivo) return;
+        try {
+          const nf = lerXmlNFe(await arquivo.text());
+          const repetida = data.notas.find(n => n.chave === nf.chave && n.status === 'Lançada');
+          if (repetida) throw new Error(`Esta nota (nº ${repetida.numero}) já foi lançada em ${fmtData(isoLocal(new Date(repetida.criado_em)))} por ${repetida.lancada_por || '—'}.`);
+          const cnpj = nf.emitente.cnpj.replace(/\D/g, '');
+          let forn = cnpj ? data.fornecedores.find(f => (f.cnpj || '') === cnpj) : null, porNome = false;
+          if (!forn) {
+            let best = null;
+            data.fornecedores.forEach(f => { const sc = Math.max(semelhanca(nf.emitente.nome, f.nome), semelhanca(nf.emitente.fantasia, f.nome)); if (sc >= 0.6 && (!best || sc > best.sc)) best = { f, sc }; });
+            if (best && !(best.f.cnpj && cnpj && best.f.cnpj !== cnpj)) { forn = best.f; porNome = true; }
+          }
+          const obraId = primeiraObra();
+          setNfForm({
+            passo: 'revisar', nf, obraId, etapaId: '', fornecedorId: forn?.id || '', porNome,
+            itens: montarItensNF(nf, obraId, forn?.id || ''),
+            parcelas: nf.parcelas.map(x => ({ ...x })), vencimento: nf.emissao || hojeISO(),
+          });
+        } catch (err) { setNfForm({ passo: 'arquivo', erro: err.message }); }
+      };
+      const mudarNF = (campo, v) => {
+        const f = { ...nfForm, [campo]: v };
+        if (campo === 'fornecedorId') { f.itens = montarItensNF(f.nf, f.obraId, v); f.porNome = false; }
+        if (campo === 'obraId') {
+          const usadas = new Set();
+          f.etapaId = '';
+          f.itens = f.itens.map(it => ({ ...it, compraId: sugerirCompraNF(it.materialId, v, f.fornecedorId, it.qtd * (numBR(it.fator) || 1), usadas) }));
+        }
+        setNfForm(f);
+      };
+      const mudarItemNF = (k, campo, v) => {
+        const itens = nfForm.itens.map((it, j) => {
+          if (j !== k) return it;
+          const n = { ...it, [campo]: v };
+          if (campo === 'materialId') {
+            n.origem = '';
+            const usadas = new Set(nfForm.itens.filter((_, i) => i !== k).map(x => x.compraId).filter(Boolean));
+            n.compraId = sugerirCompraNF(v, nfForm.obraId, nfForm.fornecedorId, it.qtd * (numBR(it.fator) || 1), usadas);
+          }
+          return n;
+        });
+        setNfForm({ ...nfForm, itens });
+      };
+      const salvarNF = async () => {
+        const f = nfForm;
+        if (!navigator.onLine) { alert('Para lançar a nota fiscal é preciso estar conectado à internet.'); return; }
+        if (!f.obraId) { alert('Escolha a obra que recebeu o material.'); return; }
+        for (const it of f.itens) {
+          if (it.materialId && !(numBR(it.fator) > 0)) { alert(`Informe o fator de conversão do item "${it.descricao}".`); return; }
+        }
+        const p = {
+          chave: f.nf.chave, numero: f.nf.numero, serie: f.nf.serie, emissao: f.nf.emissao,
+          emitente_cnpj: f.nf.emitente.cnpj, emitente_nome: f.nf.emitente.nome, fornecedor_id: f.fornecedorId || null,
+          obra_id: f.obraId, etapa_id: f.etapaId || null, valor_total: f.nf.valorTotal, frete: f.nf.frete, desconto: f.nf.desconto,
+          vencimento: f.vencimento,
+          itens: f.itens.map(it => ({ codigo: it.codigo, descricao: it.descricao, ncm: it.ncm, unidade: it.unidade, qtd: it.qtd,
+            valor_unit: it.valorUnit, valor_total: it.valorTotal, material_id: it.materialId || null,
+            fator: it.materialId ? numBR(it.fator) : 1, compra_id: it.materialId && it.compraId ? it.compraId : null })),
+          parcelas: f.parcelas.map(x => ({ numero: x.numero, vencimento: x.vencimento, valor: x.valor })),
+        };
+        if (await executar(async () => ok(await sb.rpc('lancar_nota_fiscal', { p })))) setNfForm(null);
+      };
+      const estornarNota = (n) => {
+        if (!confirm(`Estornar a NF ${n.numero}? O material sai do estoque, as contas a pagar desta nota são apagadas e os pedidos voltam para "Aprovado".`)) return;
+        executar(async () => ok(await sb.rpc('estornar_nota_fiscal', { p_id: n.id })));
+      };
+
       const salvarCotForm = async (ev) => {
         ev.preventDefault();
         const f = cotForm;
@@ -2072,11 +2219,18 @@
                 <div className="space-y-6">
                   <div className="flex justify-between items-center">
                     <h3 className="font-bold text-slate-800">Solicitações e Pedidos de Compra</h3>
+                    <div className="flex flex-wrap gap-2">
+                    {can('nota.lancar') && (
+                      <button onClick={abrirNotaFiscal} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
+                        <Icon name="fileText" className="w-4 h-4" /> Lançar nota fiscal (XML)
+                      </button>
+                    )}
                     {can('compra.criar') && (
                       <button onClick={() => abrirCompra(null)} className="bg-amber-500 hover:bg-amber-600 text-slate-950 px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2">
                         <Icon name="plus" className="w-4 h-4" /> Nova Solicitação de Compra
                       </button>
                     )}
+                    </div>
                   </div>
 
                   {can('cotacao.gerir') && (() => {
@@ -2171,6 +2325,64 @@
                       </tbody>
                     </table>
                   </div>
+
+                  {can('nota.lancar') && (() => {
+                    const notas = data.notas.filter(n => selectedObra === 'ALL' || n.obra_id === selectedObra);
+                    const fq = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+                    return (
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm">
+                        <div className="px-6 py-4 border-b border-slate-100 flex flex-wrap justify-between items-center gap-3">
+                          <div>
+                            <h4 className="font-bold text-slate-800">Notas fiscais recebidas</h4>
+                            <p className="text-xs text-slate-500">Carregue o XML da NF-e: entrada no estoque, baixa do pedido e contas a pagar de uma só vez.</p>
+                          </div>
+                          <button type="button" onClick={abrirNotaFiscal} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="fileText" className="w-4 h-4" /> Lançar nota (XML)</button>
+                        </div>
+                        {notas.length === 0 ? <p className="px-6 py-6 text-sm text-slate-400">Nenhuma nota lançada ainda.</p> : (
+                          <div className="divide-y divide-slate-100">
+                            {notas.slice(0, 60).map(n => {
+                              const itens = data.notaItens.filter(i => i.nota_id === n.id);
+                              const forn = data.fornecedores.find(f => f.id === n.fornecedor_id);
+                              const aberta = notaAberta === n.id, est = n.status === 'Estornada';
+                              return (
+                                <div key={n.id}>
+                                  <button type="button" onClick={() => setNotaAberta(aberta ? null : n.id)} className="w-full text-left px-6 py-3 flex flex-wrap items-center gap-x-4 gap-y-1 hover:bg-slate-50">
+                                    <span className={`font-bold ${est ? 'line-through text-slate-400' : 'text-slate-900'}`}>NF {n.numero}{n.serie ? `-${n.serie}` : ''}</span>
+                                    <span className="text-sm text-slate-600 flex-1 min-w-[10rem] truncate">{forn?.nome || '—'}</span>
+                                    <span className="text-xs text-slate-500 whitespace-nowrap">{fmtData(n.emissao)} · {getObraNome(n.obra_id)}</span>
+                                    <span className="font-bold text-slate-900 whitespace-nowrap">{formatBRL(n.valor_total)}</span>
+                                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${est ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-800'}`}>{n.status}</span>
+                                  </button>
+                                  {aberta && (
+                                    <div className="px-6 pb-4 space-y-3 text-sm">
+                                      <div className="overflow-x-auto">
+                                        <table className="w-full text-left text-xs">
+                                          <thead className="text-slate-500 uppercase font-bold"><tr><th className="py-1.5 pr-3">Item da nota</th><th className="py-1.5 pr-3">Qtd na nota</th><th className="py-1.5 pr-3">Valor</th><th className="py-1.5 pr-3">Entrou no estoque</th><th className="py-1.5">Pedido</th></tr></thead>
+                                          <tbody className="divide-y divide-slate-100">
+                                            {itens.map(i => { const m = getMat(i.material_id); const c = i.compra_id && data.compras.find(x => x.id === i.compra_id); return (
+                                              <tr key={i.id}>
+                                                <td className="py-1.5 pr-3"><span className="font-semibold text-slate-800">{i.descricao}</span>{i.codigo_forn && <span className="text-slate-400"> · cód. {i.codigo_forn}</span>}</td>
+                                                <td className="py-1.5 pr-3 whitespace-nowrap">{fq(i.qtd_nf)} {i.unidade_nf}</td>
+                                                <td className="py-1.5 pr-3 whitespace-nowrap">{formatBRL(i.valor_total)}</td>
+                                                <td className="py-1.5 pr-3">{m ? <span>{fq(i.qtd_estoque)} {m.unidade} de <strong>{m.nome}</strong></span> : <span className="text-slate-400">não controlado</span>}</td>
+                                                <td className="py-1.5 whitespace-nowrap">{c ? `${fq(c.qtd)} ${getMat(c.materialId)?.unidade || ''} · ${c.status === 'Comprado' ? 'Aprovado' : c.status}` : '—'}</td>
+                                              </tr>
+                                            ); })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                      <p className="text-xs text-slate-500">Chave <span className="font-mono">{fmtChave(n.chave)}</span> · lançada por {n.lancada_por} em {fmtData(isoLocal(new Date(n.criado_em)))}{n.frete > 0 ? ` · frete ${formatBRL(n.frete)}` : ''}{est ? ` · estornada por ${n.estornada_por}` : ''}</p>
+                                      {!est && user.perfil === 'Engenheiro' && <BtnAcao perigo onClick={() => estornarNota(n)}>Estornar nota</BtnAcao>}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <div className="flex justify-between items-center mb-3">
@@ -3967,6 +4179,7 @@
                   <input type="text" placeholder="Razão social / nome" value={fornForm.nome} onChange={e => setFornForm({ ...fornForm, nome: e.target.value })} className="w-full border rounded-lg px-3 py-2" required />
                   <input type="text" placeholder="Contato (telefone / e-mail)" value={fornForm.contato} onChange={e => setFornForm({ ...fornForm, contato: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
                   <input type="text" placeholder="Categoria (ex: Ferragens e Aço)" value={fornForm.categoria} onChange={e => setFornForm({ ...fornForm, categoria: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
+                  <input type="text" inputMode="numeric" placeholder="CNPJ (opcional — liga as notas fiscais a este fornecedor)" value={fornForm.cnpj} onChange={e => setFornForm({ ...fornForm, cnpj: e.target.value })} className="w-full border rounded-lg px-3 py-2" />
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setFornModal(false)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
                     <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
@@ -4301,6 +4514,151 @@
               </div>
             </div>
           )}
+
+          {nfForm && (() => {
+            const f = nfForm;
+            const fecharNF = () => setNfForm(null);
+            if (f.passo === 'arquivo') return (
+              <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-2xl max-w-lg w-full p-6 space-y-4">
+                  <h3 className="text-lg font-extrabold">Lançar nota fiscal</h3>
+                  <label className="block border-2 border-dashed border-slate-300 hover:border-amber-500 rounded-2xl p-8 text-center cursor-pointer"
+                    onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); lerArquivoNF(e.dataTransfer.files[0]); }}>
+                    <Icon name="fileText" className="w-10 h-10 mx-auto text-slate-400" />
+                    <p className="font-bold text-slate-800 mt-2">Escolher o arquivo XML da NF-e</p>
+                    <p className="text-xs text-slate-500 mt-1">O fornecedor manda o .xml por e-mail junto com o DANFE (PDF). Toque aqui ou arraste o arquivo.</p>
+                    <input type="file" accept=".xml,text/xml,application/xml" className="hidden" onChange={e => { lerArquivoNF(e.target.files[0]); e.target.value = ''; }} />
+                  </label>
+                  {f.erro && <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">{f.erro}</p>}
+                  <div className="flex justify-end"><button type="button" onClick={fecharNF} className="px-4 py-2 border rounded-lg font-bold">Fechar</button></div>
+                </div>
+              </div>
+            );
+            const nf = f.nf, fq = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+            const fornSel = data.fornecedores.find(x => x.id === f.fornecedorId);
+            const etapasObra = data.etapas.filter(e => e.obra_id === f.obraId);
+            const noEstoque = f.itens.filter(i => i.materialId).length;
+            const comPedido = f.itens.filter(i => i.materialId && i.compraId).length;
+            const somaParc = f.parcelas.reduce((s, x) => s + (Number(x.valor) || 0), 0);
+            const lbl = 'block text-xs font-bold uppercase text-slate-500';
+            const inp = 'w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900';
+            return (
+              <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+                <div className="bg-white rounded-2xl max-w-3xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto text-sm">
+                  <div>
+                    <p className="text-xs font-bold uppercase tracking-wider text-slate-500">Conferir nota fiscal</p>
+                    <h3 className="text-xl font-extrabold text-slate-900">NF {nf.numero}{nf.serie ? `-${nf.serie}` : ''} · {formatBRL(nf.valorTotal)}</h3>
+                    <p className="text-slate-600">{nf.emitente.nome} · CNPJ {nf.emitente.cnpj || '—'} · emitida em {fmtData(nf.emissao)}</p>
+                    <p className="text-[11px] text-slate-400 font-mono mt-0.5">{fmtChave(nf.chave)}</p>
+                  </div>
+                  {(nf.avisos.length > 0 || f.porNome) && (
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-amber-900 space-y-1">
+                      {nf.avisos.map((a, k) => <p key={k}>⚠️ {a}</p>)}
+                      {f.porNome && <p>O fornecedor foi reconhecido pelo nome. Confira; ao lançar, o CNPJ fica gravado no cadastro dele.</p>}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <label className={lbl}>Fornecedor
+                      <select value={f.fornecedorId} onChange={e => mudarNF('fornecedorId', e.target.value)} className={inp}>
+                        <option value="">➕ Cadastrar: {nf.emitente.nome}</option>
+                        {data.fornecedores.map(x => <option key={x.id} value={x.id}>{x.nome}</option>)}
+                      </select>
+                    </label>
+                    <label className={lbl}>Obra que recebeu
+                      <select value={f.obraId} onChange={e => mudarNF('obraId', e.target.value)} className={inp}>
+                        {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+                      </select>
+                    </label>
+                    {user.perfil === 'Engenheiro' && etapasObra.length > 0 && (
+                      <label className={lbl}>Etapa do orçamento
+                        <select value={f.etapaId} onChange={e => mudarNF('etapaId', e.target.value)} className={inp}>
+                          <option value="">— sem etapa —</option>
+                          {etapasObra.map(e => <option key={e.id} value={e.id}>{e.nome}</option>)}
+                        </select>
+                      </label>
+                    )}
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-bold uppercase text-slate-500">Itens da nota ({f.itens.length})</p>
+                    {f.itens.map((it, k) => {
+                      const mat = getMat(it.materialId), fat = numBR(it.fator) || 0;
+                      const cands = it.materialId ? data.compras.filter(c => c.materialId === it.materialId && c.obraId === f.obraId && (c.status === 'Solicitado' || c.status === 'Comprado')) : [];
+                      return (
+                        <div key={k} className={`border rounded-xl p-3 space-y-2 ${it.materialId ? 'border-slate-200' : 'border-dashed border-slate-300 bg-slate-50'}`}>
+                          <div>
+                            <p className="font-bold text-slate-900">{it.descricao}</p>
+                            <p className="text-xs text-slate-500">{it.codigo ? `Cód. ${it.codigo} · ` : ''}{fq(it.qtd)} {it.unidade} × {formatBRL(it.valorUnit)} = <strong className="text-slate-700">{formatBRL(it.valorTotal)}</strong></p>
+                          </div>
+                          <div className="grid grid-cols-12 gap-2 items-end">
+                            <label className={`${lbl} col-span-12 sm:col-span-6`}>Material no SIGO
+                              {it.origem === 'mapa' && <span className="ml-1 normal-case font-semibold text-emerald-700">· lembrado da última nota</span>}
+                              {it.origem === 'sugestao' && <span className="ml-1 normal-case font-semibold text-amber-700">· sugerido, confira</span>}
+                              <select value={it.materialId} onChange={e => mudarItemNF(k, 'materialId', e.target.value)} className={inp}>
+                                <option value="">— não entra no estoque —</option>
+                                {data.materiais.map(m => <option key={m.id} value={m.id}>{m.nome} ({m.unidade})</option>)}
+                              </select>
+                            </label>
+                            {it.materialId && (
+                              <label className={`${lbl} col-span-4 sm:col-span-2`} title={`Quantos ${mat?.unidade} há em 1 ${it.unidade} da nota`}>Fator
+                                <input value={it.fator} inputMode="decimal" onChange={e => mudarItemNF(k, 'fator', e.target.value)} className={inp} />
+                              </label>
+                            )}
+                            {it.materialId && (
+                              <label className={`${lbl} col-span-8 sm:col-span-4`}>Pedido atendido
+                                <select value={it.compraId} onChange={e => mudarItemNF(k, 'compraId', e.target.value)} className={inp}>
+                                  <option value="">— nenhum —</option>
+                                  {cands.map(c => <option key={c.id} value={c.id}>{fq(c.qtd)} {mat?.unidade} · {data.fornecedores.find(x => x.id === c.fornecedorId)?.nome || 'sem fornecedor'} · {c.status === 'Comprado' ? 'Aprovado' : c.status}</option>)}
+                                </select>
+                              </label>
+                            )}
+                          </div>
+                          {it.materialId && mat && (
+                            <p className="text-xs text-slate-600">Entra no estoque: <strong>{fq(it.qtd * fat)} {mat.unidade}</strong>
+                              {!mesmaUnidade(it.unidade, mat.unidade) && <span className="text-amber-700 font-semibold"> · a nota está em "{it.unidade}" e o material em "{mat.unidade}": confira o fator</span>}
+                              {it.compraId && (() => { const c = data.compras.find(x => x.id === it.compraId); return c && Math.abs(c.qtd - it.qtd * fat) > 0.0005 ? <span className="text-amber-700 font-semibold"> · pedido era de {fq(c.qtd)} {mat.unidade}</span> : null; })()}
+                            </p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="bg-slate-50 rounded-xl p-3 space-y-1">
+                      <div className="flex justify-between"><span className="text-slate-500">Produtos</span><span>{formatBRL(nf.valorProdutos)}</span></div>
+                      {nf.frete > 0 && <div className="flex justify-between"><span className="text-slate-500">Frete</span><span>{formatBRL(nf.frete)}</span></div>}
+                      {nf.desconto > 0 && <div className="flex justify-between"><span className="text-slate-500">Desconto</span><span>− {formatBRL(nf.desconto)}</span></div>}
+                      <div className="flex justify-between font-bold border-t border-slate-200 pt-1"><span>Total da nota</span><span>{formatBRL(nf.valorTotal)}</span></div>
+                    </div>
+                    <div className="space-y-2">
+                      <p className="text-xs font-bold uppercase text-slate-500">Contas a pagar que serão criadas</p>
+                      {f.parcelas.length ? f.parcelas.map((x, k) => (
+                        <div key={k} className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500 w-16">Parc. {k + 1}</span>
+                          <input type="date" value={x.vencimento} onChange={e => setNfForm({ ...f, parcelas: f.parcelas.map((y, j) => j === k ? { ...y, vencimento: e.target.value } : y) })} className="border rounded-lg px-2 py-1.5 text-sm" />
+                          <span className="font-bold ml-auto">{formatBRL(x.valor)}</span>
+                        </div>
+                      )) : (
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs text-slate-500">Vencimento</span>
+                          <input type="date" value={f.vencimento} onChange={e => setNfForm({ ...f, vencimento: e.target.value })} className="border rounded-lg px-2 py-1.5 text-sm" />
+                          <span className="font-bold ml-auto">{formatBRL(nf.valorTotal)}</span>
+                        </div>
+                      )}
+                      {f.parcelas.length > 0 && Math.abs(somaParc - nf.valorTotal) > 0.01 && <p className="text-xs text-amber-700 font-semibold">As parcelas somam {formatBRL(somaParc)}, diferente do total da nota.</p>}
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-slate-500">Ao lançar: {noEstoque} {noEstoque === 1 ? 'item entra' : 'itens entram'} no estoque de {getObraNome(f.obraId)}{comPedido ? `, ${comPedido} ${comPedido === 1 ? 'pedido é baixado' : 'pedidos são baixados'}` : ''}{fornSel ? '' : ', o fornecedor é cadastrado'} e {f.parcelas.length || 1} {(f.parcelas.length || 1) === 1 ? 'conta a pagar é criada' : 'contas a pagar são criadas'} no Financeiro.</p>
+                  <div className="flex justify-end gap-2">
+                    <button type="button" onClick={fecharNF} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="button" disabled={enviando} onClick={salvarNF} className="disabled:opacity-50 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold">Lançar nota</button>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {cotForm && (
             <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
