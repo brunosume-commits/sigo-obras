@@ -1,6 +1,6 @@
 // SIGO — guarda os arquivos do sistema no aparelho para abrir sem internet.
 // Os dados (Supabase) não passam por aqui: o app guarda os últimos dados e a fila de lançamentos.
-const VERSAO = 'sigo-v1';
+const VERSAO = 'sigo-v2';
 const CASCA = ['./', './index.html', './manifest.webmanifest', './icone-192.png', './icone-512.png'];
 const CDN = [
   'https://cdn.tailwindcss.com',
