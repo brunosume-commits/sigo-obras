@@ -4,6 +4,11 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SIGO — Sistema Integrado de Gestão de Obras</title>
+  <meta name="theme-color" content="#0f172a" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="icon" type="image/png" href="./icone-192.png" />
+  <link rel="apple-touch-icon" href="./icone-192.png" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
@@ -15,6 +20,12 @@
     // ela é pública por natureza; quem protege os dados são as regras do banco (schema.sql).
     const SUPABASE_URL = 'https://jaigqruhrslgttzqbmom.supabase.co';
     const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImphaWdxcnVocnNsZ3R0enFibW9tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ1MDk1NDIsImV4cCI6MjExMDA4NTU0Mn0.-ixqR8w68yJP34zDy32jtHWcRyVR699CFLgUU6DH7BM';
+  </script>
+  <script>
+    // Instala o SIGO como aplicativo e guarda os arquivos para abrir sem internet
+    if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+      window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+    }
   </script>
   <style>
     @media print {
@@ -30,7 +41,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useCallback } = React;
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
     const Icon = ({ name, className = "w-5 h-5" }) => {
       const paths = {
@@ -179,10 +190,50 @@
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
     const num = (v) => v === null || v === undefined ? v : Number(v);
 
+    // ---------- Uso sem internet ----------
+    const ehErroRede = (e) => !!e && (e.rede || /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(e.message || ''));
+    const novoId = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
+    const lerLocal = (chave, padrao) => { try { const v = localStorage.getItem(chave); return v ? JSON.parse(v) : padrao; } catch { return padrao; } };
+    const gravarLocal = (chave, valor) => { try { localStorage.setItem(chave, JSON.stringify(valor)); return true; } catch { return false; } };
+    const apagarLocal = (chave) => { try { localStorage.removeItem(chave); } catch {} };
+
+    // Mostra na tela o efeito dos lançamentos que ainda estão na fila (estoque, presença, diário, EPI)
+    function aplicarFila(base, fila) {
+      const ativos = fila.filter(i => !i.erro);
+      if (!ativos.length) return base;
+      const d = { ...base, materiais: base.materiais.map(m => ({ ...m, estoques: { ...m.estoques } })),
+        movimentacoes: [...base.movimentacoes], presencas: [...base.presencas], diarios: [...base.diarios], epis: [...base.epis] };
+      const soma = (mat, obra, q) => { const m = d.materiais.find(x => x.id === mat); if (m && obra) m.estoques[obra] = (m.estoques[obra] || 0) + q; };
+      for (const it of ativos) {
+        const a = it.args;
+        if (it.tipo === 'movimentacao') {
+          const q = Number(a.qtd);
+          soma(a.material, a.obra, a.tipo === 'Entrada' ? q : -q);
+          if (a.tipo === 'Transferência') soma(a.material, a.obra_destino, q);
+          d.movimentacoes.unshift({ id: it.id, data: tsLocal(it.quando), tipo: a.tipo, obraId: a.obra, obraDestinoId: a.obra_destino || null,
+            materialId: a.material, qtd: q, responsavel: a.responsavel, obs: a.obs, estornada: false, pendente: true });
+        } else if (it.tipo === 'presenca') {
+          d.presencas = d.presencas.filter(x => !(x.funcionarioId === a.funcionario && x.dia === a.dia));
+          if (a.presenca) d.presencas.push({ funcionarioId: a.funcionario, dia: a.dia, status: a.presenca });
+        } else if (it.tipo === 'epi') {
+          soma(a.material, a.obra, -Number(a.qtd));
+          d.epis.unshift({ id: it.id, funcionario_id: a.funcionario, material_id: a.material, obra_id: a.obra, qtd: Number(a.qtd), ca: a.ca,
+            troca_prevista: a.troca || null, dia: isoLocal(new Date(it.quando)), criado_em: it.quando, entregue_por: 'aguardando envio', pendente: true });
+        } else if (it.tipo === 'diario') {
+          const atual = d.diarios.find(x => x.obra_id === a.obra && x.dia === a.dia);
+          const campos = { clima_manha: a.clima_manha, clima_tarde: a.clima_tarde, servicos: a.servicos, ocorrencias: a.ocorrencias, observacoes: a.observacoes, pendente: true };
+          d.diarios = atual ? d.diarios.map(x => x === atual ? { ...x, ...campos } : x)
+            : [{ id: it.id, obra_id: a.obra, dia: a.dia, autor_nome: a.autor, fotos: [], ...campos }, ...d.diarios];
+        }
+      }
+      return d;
+    }
+
     // Lança erro do Supabase de forma amigável
     const ok = ({ data, error }) => {
       if (error) {
         const msg = error.message || String(error);
+        if (ehErroRede({ message: msg })) { const e = new Error('Sem conexão com a internet. Esta operação precisa de internet; tente de novo quando a conexão voltar.'); e.rede = true; throw e; }
         if (/row-level security|permission denied|Sem permissão/i.test(msg)) throw new Error('Seu perfil não tem permissão para esta operação.');
         if (/violates foreign key/i.test(msg)) throw new Error('Este registro está vinculado a outros lançamentos e não pode ser excluído.');
         if (/duplicate key.*codigo/i.test(msg)) throw new Error('Já existe um material com este código.');
@@ -288,7 +339,14 @@
       const [cadastroNome, setCadastroNome] = useState('');
       const [loginInfo, setLoginInfo] = useState('');
 
-      const [data, setData] = useState(DADOS_VAZIOS);
+      const [dadosBase, setData] = useState(DADOS_VAZIOS);
+      const [fila, setFila] = useState([]);                       // lançamentos feitos sem internet, aguardando envio
+      const data = useMemo(() => aplicarFila(dadosBase, fila), [dadosBase, fila]);
+      const [online, setOnline] = useState(navigator.onLine);
+      const [usandoCache, setUsandoCache] = useState(null);      // horário dos dados salvos no aparelho, quando em uso
+      const [filaModal, setFilaModal] = useState(false);
+      const [enviandoFila, setEnviandoFila] = useState(false);
+      const [semSessao, setSemSessao] = useState(false);          // entrou offline sem sessão válida: precisa entrar de novo para enviar
       const [sincronizado, setSincronizado] = useState(null);   // horário da última leitura
       const [erroConexao, setErroConexao] = useState('');
 
@@ -350,13 +408,25 @@
 
       // ---------- Sessão ----------
       const abrirSessao = async (session) => {
-        if (!session) { setUser(null); setData(DADOS_VAZIOS); return; }
-        const { data: p, error } = await sb.from('perfis').select('*').eq('id', session.user.id).maybeSingle();
+        if (!session) {
+          const ult = lerLocal('sigo_ultimo_usuario', null);
+          if (ult && !navigator.onLine) { setSemSessao(true); setUser(ult); setActiveTab(t => t || PERMISSOES[ult.perfil].abaInicial); return; }
+          setUser(null); setData(DADOS_VAZIOS); return;
+        }
+        const { data: p, error } = await sb.from('perfis').select('*').eq('id', session.user.id).maybeSingle().then(r => r, e => ({ error: e }));
+        if (error && ehErroRede(error)) {
+          const ult = lerLocal('sigo_ultimo_usuario', null);
+          if (ult && ult.id === session.user.id) { setUser(prev => { if (!prev) setActiveTab(PERMISSOES[ult.perfil].abaInicial); return prev && prev.id === ult.id ? prev : ult; }); return; }
+          setLoginErro('Sem conexão com a internet. Entre uma vez com internet para usar o SIGO neste aparelho.'); return;
+        }
+        setSemSessao(false);
         if (error || !p) { setLoginErro('Usuário sem perfil cadastrado. Fale com o Engenheiro responsável.'); await sb.auth.signOut(); return; }
         if (!p.ativo) { setLoginErro('Seu acesso ainda não foi liberado (ou foi desativado). Fale com o Engenheiro responsável.'); await sb.auth.signOut(); return; }
+        const u = { id: p.id, email: p.email, nome: p.nome, perfil: p.perfil };
+        gravarLocal('sigo_ultimo_usuario', u);
         setUser(prev => {
           if (!prev || prev.id !== p.id) setActiveTab(PERMISSOES[p.perfil].abaInicial);
-          return { id: p.id, email: p.email, nome: p.nome, perfil: p.perfil };
+          return prev && prev.id === u.id && prev.perfil === u.perfil && prev.nome === u.nome ? prev : u;
         });
       };
 
@@ -364,7 +434,7 @@
         if (!sb) { setCarregandoSessao(false); return; }
         sb.auth.getSession().then(({ data: { session } }) => abrirSessao(session).finally(() => setCarregandoSessao(false)));
         const { data: { subscription } } = sb.auth.onAuthStateChange((evento, session) => {
-          if (evento === 'SIGNED_OUT') { setUser(null); setData(DADOS_VAZIOS); }
+          if (evento === 'SIGNED_OUT') { setUser(null); setData(DADOS_VAZIOS); setFila([]); setUsandoCache(null); }
           if (evento === 'SIGNED_IN') abrirSessao(session);
         });
         return () => subscription.unsubscribe();
@@ -401,19 +471,89 @@
         alert('Enviamos um link para redefinir a senha no seu e-mail.');
       };
 
-      const sair = () => sb.auth.signOut();
+      const sair = async () => {
+        const pend = fila.filter(i => !i.erro).length;
+        if (pend && !confirm(`Há ${pend} lançamento(s) feito(s) sem internet que ainda não foram enviados.\n\nEles ficam guardados neste aparelho e serão enviados quando você entrar de novo. Sair mesmo assim?`)) return;
+        if (user) apagarLocal('sigo_cache_' + user.id);
+        apagarLocal('sigo_ultimo_usuario');
+        setSemSessao(false);
+        await sb.auth.signOut().catch(() => {});
+        setUser(null); setData(DADOS_VAZIOS); setFila([]);
+      };
+
+      // ---------- Fila de lançamentos sem internet ----------
+      useEffect(() => { setFila(user ? lerLocal('sigo_fila_' + user.id, []) : []); }, [user?.id]);
+      const mudarFila = (fn) => setFila(atual => { const nova = fn(atual); if (user) gravarLocal('sigo_fila_' + user.id, nova); return nova; });
+      useEffect(() => {
+        const on = () => setOnline(true), off = () => setOnline(false);
+        window.addEventListener('online', on); window.addEventListener('offline', off);
+        return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+      }, []);
+
+      const enfileirar = (tipo, args, resumo, mesmo) => {
+        const item = { id: novoId(), tipo, args, resumo, quando: new Date().toISOString() };
+        // presença e diário: vale só o último lançamento para o mesmo funcionário/obra no mesmo dia
+        mudarFila(f => [...f.filter(i => i.erro || !mesmo || !mesmo(i)), item]);
+      };
+      // Grava pela internet; se não houver conexão, guarda no aparelho para enviar depois
+      const lancar = async (tipo, args, resumo, online_, mesmo) => {
+        if (!navigator.onLine) { enfileirar(tipo, args, resumo, mesmo); return true; }
+        setEnviando(true);
+        try { await online_(); await recarregar(); return true; }
+        catch (err) {
+          if (ehErroRede(err)) { enfileirar(tipo, args, resumo, mesmo); return true; }
+          alert(err.message); return false;
+        }
+        finally { setEnviando(false); }
+      };
+
+      const sincronizando = useRef(false);
+      const recarregarRef = useRef(() => {});
+      const sincronizarFila = useCallback(async (manual) => {
+        if (!user || sincronizando.current || !navigator.onLine) return;
+        const lista = lerLocal('sigo_fila_' + user.id, []).filter(i => !i.erro);
+        if (!lista.length) return;
+        const { data: { session } } = await sb.auth.getSession().catch(() => ({ data: {} }));
+        if (!session) { setSemSessao(true); if (manual) alert('Entre de novo com seu e-mail e senha para enviar os lançamentos guardados.'); return; }
+        sincronizando.current = true; setEnviandoFila(true);
+        let enviados = 0, falhas = 0;
+        try {
+          for (const it of lista) {
+            const r = await sb.rpc('sincronizar_offline', { p_id: it.id, p_tipo: it.tipo, p_args: it.args, p_quando: it.quando }).then(x => x, e => ({ error: e }));
+            if (r.error && ehErroRede(r.error)) break;                     // caiu de novo: tenta mais tarde
+            if (r.error) { falhas++; mudarFila(f => f.map(i => i.id === it.id ? { ...i, erro: r.error.message } : i)); }
+            else { enviados++; mudarFila(f => f.filter(i => i.id !== it.id)); }
+          }
+        } finally { sincronizando.current = false; setEnviandoFila(false); }
+        if (enviados || falhas) recarregarRef.current();
+        if (falhas) setFilaModal(true);
+      }, [user?.id]);
+      useEffect(() => {
+        if (!user || !online) return;
+        sincronizarFila();
+        const t = setInterval(() => sincronizarFila(), 30000);
+        return () => clearInterval(t);
+      }, [user?.id, online, sincronizarFila]);
 
       // ---------- Leitura + tempo real ----------
       const recarregar = useCallback(async () => {
         if (!user) return;
         try {
-          setData(await carregarDados(user.perfil, mesPresenca, mesFolha, diarioDia));
+          const novos = await carregarDados(user.perfil, mesPresenca, mesFolha, diarioDia);
+          setData(novos);
           setSincronizado(new Date());
-          setErroConexao('');
+          setErroConexao(''); setUsandoCache(null);
+          gravarLocal('sigo_cache_' + user.id, { quando: new Date().toISOString(), dados: novos });
         } catch (err) {
-          setErroConexao('Não foi possível ler os dados do servidor: ' + err.message);
+          const cache = lerLocal('sigo_cache_' + user.id, null);
+          if (ehErroRede(err) || !navigator.onLine) {
+            setErroConexao('');
+            if (cache) { setData(atual => atual.obras.length ? atual : { ...DADOS_VAZIOS, ...cache.dados }); setUsandoCache(cache.quando); }
+            else setErroConexao('Sem internet e ainda não há dados salvos neste aparelho. Abra o SIGO uma vez com internet.');
+          } else setErroConexao('Não foi possível ler os dados do servidor: ' + err.message);
         }
       }, [user?.id, user?.perfil, mesPresenca, mesFolha, diarioDia]);
+      recarregarRef.current = recarregar;
 
       useEffect(() => {
         if (!user) return;
@@ -551,8 +691,13 @@
       const alternarStatusDespesa = (d) => executar(async () =>
         ok(await sb.from('despesas').update({ status: d.status === 'Pago' ? 'A pagar' : 'Pago' }).eq('id', d.id)));
 
-      const marcarPresenca = (f, presenca, dia) => executar(async () =>
-        ok(await sb.rpc('marcar_presenca', { p_funcionario: f.id, p_presenca: presenca, p_dia: dia })));
+      const marcarPresenca = (f, presenca, dia) => {
+        if (dia > hojeISO()) return alert('Não é possível registrar presença em data futura.');
+        return lancar('presenca', { funcionario: f.id, presenca, dia },
+          `Presença: ${f.nome} — ${presenca || 'sem registro'} em ${fmtData(dia)}`,
+          async () => ok(await sb.rpc('marcar_presenca', { p_funcionario: f.id, p_presenca: presenca, p_dia: dia })),
+          (i) => i.tipo === 'presenca' && i.args.funcionario === f.id && i.args.dia === dia);
+      };
 
       const alterarPerfilUsuario = (p, campos) => {
         if (p.id === user.id && (campos.perfil && campos.perfil !== 'Engenheiro' || campos.ativo === false)) {
@@ -587,11 +732,14 @@
       };
       const salvarDiario = async () => {
         if (!obraDiarioId) return alert('Cadastre uma obra antes.');
-        if (await executar(garantirDiario)) setDiarioForm(null);
+        if (await lancar('diario', { obra: obraDiarioId, dia: diarioDia, autor: user.nome, ...formDiario },
+          `Diário: ${getObraNome(obraDiarioId)} — ${fmtData(diarioDia)}`, garantirDiario,
+          (i) => i.tipo === 'diario' && i.args.obra === obraDiarioId && i.args.dia === diarioDia)) setDiarioForm(null);
       };
       const enviarFotos = async (files) => {
         const lista = Array.from(files || []).filter(f => f.type.startsWith('image/'));
         if (!lista.length) return;
+        if (!navigator.onLine) return alert('As fotos só podem ser enviadas com internet. O texto do diário pode ser salvo agora e as fotos depois.');
         setEnviandoFotos(lista.length);
         await executar(async () => {
           const id = await garantirDiario();
@@ -778,9 +926,13 @@
         if (!(qtd > 0)) return alert('Informe a quantidade.');
         const saldo = getMat(epiForm.materialId)?.estoques[epiForm.obraId] || 0;
         if (qtd > saldo) return alert(`Saldo insuficiente na obra (disponível: ${saldo}).`);
-        if (await executar(async () => ok(await sb.rpc('entregar_epi', {
-          p_funcionario: epiForm.funcionarioId, p_material: epiForm.materialId, p_obra: epiForm.obraId,
-          p_qtd: qtd, p_ca: (epiForm.ca || '').trim(), p_troca: epiForm.troca || null })))) setEpiModal(false);
+        const fu = data.funcionarios.find(x => x.id === epiForm.funcionarioId);
+        if (await lancar('epi', { funcionario: epiForm.funcionarioId, material: epiForm.materialId, obra: epiForm.obraId,
+              qtd, ca: (epiForm.ca || '').trim(), troca: epiForm.troca || '' },
+            `EPI: ${qtd} ${getMat(epiForm.materialId)?.nome} para ${fu?.nome}`,
+            async () => ok(await sb.rpc('entregar_epi', {
+              p_funcionario: epiForm.funcionarioId, p_material: epiForm.materialId, p_obra: epiForm.obraId,
+              p_qtd: qtd, p_ca: (epiForm.ca || '').trim(), p_troca: epiForm.troca || null })))) setEpiModal(false);
       };
       const cancelarEntregaEpi = (ent) => {
         if (!confirm('Cancelar esta entrega de EPI? O material volta para o estoque da obra.')) return;
@@ -881,11 +1033,15 @@
         if ((movModal === 'Saída' || movModal === 'Transferência') && qtd > saldoAtual) {
           return alert(`Saldo insuficiente na obra selecionada (Disponível: ${saldoAtual} ${mat?.unidade}).`);
         }
-        const okGravou = await executar(async () => ok(await sb.rpc('registrar_movimentacao', {
-          p_tipo: movModal, p_obra: movForm.obraId,
-          p_obra_destino: movModal === 'Transferência' ? movForm.obraDestinoId : null,
-          p_material: movForm.materialId, p_qtd: qtd, p_responsavel: movForm.responsavel, p_obs: movForm.obs || '-'
-        })));
+        const okGravou = await lancar('movimentacao', {
+            tipo: movModal, obra: movForm.obraId, obra_destino: movModal === 'Transferência' ? movForm.obraDestinoId : '',
+            material: movForm.materialId, qtd, responsavel: movForm.responsavel, obs: movForm.obs || '-' },
+          `${movModal}: ${qtd} ${mat?.unidade || ''} de ${mat?.nome} — ${getObraNome(movForm.obraId)}`,
+          async () => ok(await sb.rpc('registrar_movimentacao', {
+            p_tipo: movModal, p_obra: movForm.obraId,
+            p_obra_destino: movModal === 'Transferência' ? movForm.obraDestinoId : null,
+            p_material: movForm.materialId, p_qtd: qtd, p_responsavel: movForm.responsavel, p_obs: movForm.obs || '-'
+          })));
         if (okGravou) setMovModal(null);
       };
 
@@ -1047,8 +1203,8 @@
               <div>
                 <p className="font-bold text-white">{user.nome}</p>
                 <p className="text-slate-400">Perfil: {user.perfil}</p>
-                <p className={erroConexao ? 'text-red-400' : 'text-slate-500'}>
-                  {erroConexao ? 'Sem conexão com o servidor' : sincronizado ? `Sincronizado às ${pad2(sincronizado.getHours())}:${pad2(sincronizado.getMinutes())}` : 'Sincronizando…'}
+                <p className={erroConexao || !online || usandoCache ? 'text-amber-400' : 'text-slate-500'}>
+                  {!online || usandoCache ? 'Sem internet' : erroConexao ? 'Sem conexão com o servidor' : sincronizado ? `Sincronizado às ${pad2(sincronizado.getHours())}:${pad2(sincronizado.getMinutes())}` : 'Sincronizando…'}
                 </p>
               </div>
               <button onClick={sair} title="Sair" className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800">
@@ -1082,6 +1238,27 @@
             </header>
 
             <div className="p-6 space-y-6 max-w-7xl w-full mx-auto">
+              {(!online || usandoCache || fila.length > 0 || semSessao) && (() => {
+                const pend = fila.filter(i => !i.erro).length, erros = fila.length - pend;
+                const quando = usandoCache ? new Date(usandoCache) : null;
+                return (
+                  <div className={`no-print rounded-xl p-4 text-sm flex flex-wrap justify-between items-center gap-3 border ${!online || usandoCache ? 'bg-slate-800 border-slate-700 text-white' : 'bg-sky-50 border-sky-200 text-sky-900'}`}>
+                    <div className="space-y-1">
+                      {(!online || usandoCache) && <p className="font-bold">Sem internet{quando ? ` — mostrando os dados salvos neste aparelho em ${fmtData(isoLocal(quando))} às ${pad2(quando.getHours())}:${pad2(quando.getMinutes())}` : ''}.</p>}
+                      {(!online || usandoCache) && <p className="text-xs opacity-80">Saídas e entradas de material, presença, texto do diário e entrega de EPI ficam guardados e são enviados sozinhos quando a conexão voltar.</p>}
+                      {pend > 0 && <p><b>{pend}</b> lançamento(s) aguardando envio{online && !usandoCache ? (enviandoFila ? ' — enviando…' : '') : ''}.</p>}
+                      {erros > 0 && <p className="text-red-500 font-bold">{erros} lançamento(s) não puderam ser enviados. Veja o motivo.</p>}
+                      {semSessao && pend > 0 && online && <p className="font-bold">Entre de novo com seu e-mail e senha para enviar.</p>}
+                    </div>
+                    <div className="flex gap-2">
+                      {fila.length > 0 && <button type="button" onClick={() => setFilaModal(true)} className={`text-xs font-bold px-3 py-2 rounded-lg border ${!online || usandoCache ? 'border-slate-500' : 'border-sky-300 bg-white'}`}>Ver pendentes</button>}
+                      {online && pend > 0 && !semSessao && <button type="button" disabled={enviandoFila} onClick={() => sincronizarFila(true)} className="text-xs font-bold px-3 py-2 rounded-lg bg-amber-500 text-slate-900 disabled:opacity-50">Enviar agora</button>}
+                      {online && semSessao && <button type="button" onClick={sair} className="text-xs font-bold px-3 py-2 rounded-lg bg-amber-500 text-slate-900">Entrar de novo</button>}
+                      {online && usandoCache && !semSessao && <button type="button" onClick={recarregar} className="text-xs font-bold px-3 py-2 rounded-lg bg-white text-slate-900">Atualizar</button>}
+                    </div>
+                  </div>
+                );
+              })()}
               {erroConexao && (
                 <div className="no-print bg-red-50 border border-red-200 text-red-800 rounded-xl p-4 text-sm flex justify-between items-center gap-3">
                   <span>{erroConexao}</span>
@@ -1264,10 +1441,10 @@
                                     : getObraNome(mv.obraId)}
                                 </td>
                                 <td className="px-6 py-3 font-medium text-slate-700">{mv.responsavel}</td>
-                                <td className="px-6 py-3 text-xs text-slate-500">{mv.obs}</td>
+                                <td className="px-6 py-3 text-xs text-slate-500">{mv.obs}{mv.pendente && <span className="ml-1 text-[10px] font-bold uppercase bg-amber-100 text-amber-800 px-1.5 py-0.5 rounded">aguardando envio</span>}</td>
                                 {can('mov.estornar') && (
                                   <td className="px-6 py-3 no-print">
-                                    {mv.tipo !== 'Estorno' && !mv.estornada && <BtnAcao perigo onClick={() => estornarMov(mv)}>Estornar</BtnAcao>}
+                                    {mv.tipo !== 'Estorno' && !mv.estornada && !mv.pendente && <BtnAcao perigo onClick={() => estornarMov(mv)}>Estornar</BtnAcao>}
                                   </td>
                                 )}
                               </tr>
@@ -2023,7 +2200,7 @@
                                 <td className="px-6 py-3 text-xs">{e.ca || '—'}</td>
                                 <td className="px-6 py-3 text-xs whitespace-nowrap">{e.troca_prevista ? <span className={atual && t === 'vencida' ? 'text-red-700 font-bold' : atual && t === 'breve' ? 'text-amber-700 font-bold' : ''}>{fmtData(e.troca_prevista)}{!atual ? ' (já trocado)' : ''}</span> : '—'}</td>
                                 <td className="px-6 py-3 text-xs">{e.entregue_por}</td>
-                                {can('epi.cancelar') && <td className="px-6 py-3 no-print"><BtnAcao perigo onClick={() => cancelarEntregaEpi(e)}>Cancelar</BtnAcao></td>}
+                                {can('epi.cancelar') && <td className="px-6 py-3 no-print">{e.pendente ? <span className="text-xs text-amber-700 font-bold">aguardando envio</span> : <BtnAcao perigo onClick={() => cancelarEntregaEpi(e)}>Cancelar</BtnAcao>}</td>}
                               </tr>
                             );
                           })}
@@ -2488,6 +2665,34 @@
                     <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
                   </div>
                 </form>
+              </div>
+            </div>
+          )}
+
+          {filaModal && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-2xl w-full p-6 space-y-4 max-h-[95vh] overflow-y-auto">
+                <div className="flex justify-between items-center">
+                  <h3 className="text-lg font-extrabold">Lançamentos guardados neste aparelho</h3>
+                  <button type="button" onClick={() => setFilaModal(false)} className="px-3 py-1.5 border rounded-lg text-xs font-bold">Fechar</button>
+                </div>
+                {fila.length === 0 && <p className="text-sm text-slate-500">Tudo enviado. Nenhum lançamento pendente.</p>}
+                <ul className="divide-y divide-slate-100 text-sm">
+                  {fila.map(i => { const q = new Date(i.quando); return (
+                    <li key={i.id} className="py-3 flex flex-wrap justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-slate-800">{i.resumo}</p>
+                        <p className="text-xs text-slate-500">Feito em {fmtData(isoLocal(q))} às {pad2(q.getHours())}:{pad2(q.getMinutes())}</p>
+                        {i.tipo === 'diario' && i.erro && <p className="text-xs text-slate-600 mt-1 whitespace-pre-wrap bg-slate-50 rounded p-2">{[i.args.servicos, i.args.ocorrencias, i.args.observacoes].filter(Boolean).join('\n\n')}</p>}
+                        {i.erro ? <p className="text-xs text-red-700 font-bold mt-1">Não enviado: {i.erro}</p> : <p className="text-xs text-amber-700 font-bold mt-1">Aguardando envio</p>}
+                      </div>
+                      <div className="flex items-start gap-1">
+                        {i.erro && <BtnAcao onClick={() => { mudarFila(f => f.map(x => x.id === i.id ? { ...x, erro: undefined } : x)); setTimeout(() => sincronizarFila(true), 50); }}>Tentar de novo</BtnAcao>}
+                        <BtnAcao perigo onClick={() => { if (confirm('Descartar este lançamento? Ele não será enviado.')) mudarFila(f => f.filter(x => x.id !== i.id)); }}>Descartar</BtnAcao>
+                      </div>
+                    </li>
+                  ); })}
+                </ul>
               </div>
             </div>
           )}
