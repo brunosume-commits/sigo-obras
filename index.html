@@ -61,6 +61,7 @@
         wallet: <><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>,
         book: <><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8"/><path d="M8 11h6"/></>,
         camera: <><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>,
+        bolt: <><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z"/></>,
         gauge: <><path d="M12 14l4-4"/><path d="M3.3 19a10 10 0 1 1 17.4 0"/></>,
         eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></>,
         check: <><path d="M9 11l3 3 8-8"/><path d="M20 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></>,
@@ -170,7 +171,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'consumo', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'portal', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -180,7 +181,7 @@
       },
       'Mestre de Obras': {
         abaInicial: 'materiais',
-        abas: ['materiais', 'obras', 'orcamento', 'consumo', 'diario', 'qualidade', 'compras', 'funcionarios', 'epi', 'documentos'],
+        abas: ['materiais', 'obras', 'orcamento', 'consumo', 'produtividade', 'diario', 'qualidade', 'compras', 'funcionarios', 'epi', 'documentos'],
         acoes: ['mov.Saída', 'compra.criar', 'func.presenca', 'diario.gerir', 'epi.entregar', 'orcamento.avanco', 'producao.lancar'],
       },
       'Cliente': {
@@ -194,7 +195,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null, modelos: [], inspecoes: [], pendencias: [], portal: [], clienteObras: [], servicos: [], indices: [], producoes: [], prodFuncs: [] };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -330,8 +331,9 @@
         sb.from('servicos_producao').select('*').order('nome', { ascending: true }),
         sb.from('indices_consumo').select('*'),
         (eng || perfil === 'Mestre de Obras') ? sb.from('producoes').select('*').order('dia', { ascending: false }).order('criado_em', { ascending: false }).limit(3000) : Promise.resolve({ data: [] }),
+        (eng || perfil === 'Mestre de Obras') ? sb.from('producao_funcionarios').select('*') : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa, modelos, inspecoes, pendencias, portal, clienteObras, servicos, indices, producoes, prodFuncs] = (await Promise.all(consultas)).map(ok);
       const inspItens = inspecoes.length ? ok(await sb.from('inspecao_itens').select('*').in('inspecao_id', inspecoes.map(i => i.id)).order('ordem', { ascending: true })) : [];
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
@@ -378,8 +380,10 @@
         inspecoes: inspecoes.map(i => ({ ...i, itens: inspItens.filter(x => x.inspecao_id === i.id) })),
         pendencias,
         portal: portal || [], clienteObras,
-        servicos, indices: indices.map(i => ({ ...i, consumo: num(i.consumo), tolerancia_pct: num(i.tolerancia_pct) })),
-        producoes: producoes.map(x => ({ ...x, quantidade: num(x.quantidade) })),
+        indices: indices.map(i => ({ ...i, consumo: num(i.consumo), tolerancia_pct: num(i.tolerancia_pct) })),
+        producoes: producoes.map(x => ({ ...x, quantidade: num(x.quantidade), hh: num(x.hh) })),
+        servicos: servicos.map(x => ({ ...x, rup_ref: num(x.rup_ref) })),
+        prodFuncs,
       };
     }
 
@@ -461,6 +465,7 @@
       const [analise, setAnalise] = useState({ chave: '', linhas: [] });
       const [prodForm, setProdForm] = useState(null);
       const [servForm, setServForm] = useState(null);
+      const [prodPeriodo, setProdPeriodo] = useState('obra');
       useEffect(() => {
         if (user?.perfil !== 'Engenheiro') { setSouAdmin(false); return; }
         sb.rpc('sou_administrador', {}).then(({ data: r }) => setSouAdmin(r === true), () => setSouAdmin(false));
@@ -940,19 +945,28 @@
       const abrirProducao = () => {
         const sv = data.servicos.filter(x => x.ativo);
         if (!sv.length) return alert(user.perfil === 'Engenheiro' ? 'Cadastre primeiro os serviços e seus índices de consumo (botão Serviços e índices).' : 'O Engenheiro ainda não cadastrou os serviços.');
-        setProdForm({ obraId: consObraId, servicoId: sv[0].id, quantidade: '', dia: hojeISO(), local: '', equipe: '', etapaId: '' });
+        setProdForm({ obraId: consObraId, servicoId: sv[0].id, quantidade: '', dia: hojeISO(), local: '', equipe: '', etapaId: '', funcs: [], pessoas: '', horas: '8' });
       };
       const salvarProducao = async (ev) => {
         ev.preventDefault();
         const f = prodForm, q = numBR(f.quantidade);
         if (!(q > 0)) return alert('Informe a quantidade executada.');
         if (f.dia > hojeISO()) return alert('A data não pode ser futura.');
-        if (await executar(async () => ok(await sb.from('producoes').insert({ obra_id: f.obraId, servico_id: f.servicoId, quantidade: q, dia: f.dia, local: f.local.trim(), equipe: f.equipe.trim(), etapa_id: f.etapaId || null, registrado_por: user.nome })))) setProdForm(null);
+        const horas = numBR(f.horas) || 0;
+        const pessoas = f.funcs.length || Math.max(1, parseInt(f.pessoas) || 0);
+        if (!f.funcs.length && !(parseInt(f.pessoas) > 0)) return alert('Marque quem executou ou, para empreiteiro, informe o nº de pessoas.');
+        const nomes = f.funcs.map(id => data.funcionarios.find(x => x.id === id)?.nome.split(' ')[0]).filter(Boolean);
+        const equipe = nomes.length ? nomes.join(' e ') : f.equipe.trim();
+        if (await executar(async () => {
+          const id = ok(await sb.from('producoes').insert({ obra_id: f.obraId, servico_id: f.servicoId, quantidade: q, dia: f.dia, local: f.local.trim(), equipe, etapa_id: f.etapaId || null,
+            registrado_por: user.nome, pessoas, hh: r2(pessoas * horas) }).select().single()).id;
+          if (f.funcs.length) ok(await sb.from('producao_funcionarios').insert(f.funcs.map(fid => ({ producao_id: id, funcionario_id: fid }))));
+        })) setProdForm(null);
       };
       const excluirProducao = (x) => { if (confirm('Excluir este lançamento de produção?')) executar(async () => ok(await sb.from('producoes').delete().eq('id', x.id))); };
-      const abrirServico = (sv) => setServForm(sv ? { id: sv.id, nome: sv.nome, unidade: sv.unidade, ativo: sv.ativo,
+      const abrirServico = (sv) => setServForm(sv ? { id: sv.id, nome: sv.nome, unidade: sv.unidade, ativo: sv.ativo, rup: sv.rup_ref ? String(sv.rup_ref).replace('.', ',') : '',
           itens: data.indices.filter(i => i.servico_id === sv.id).map(i => ({ materialId: i.material_id, consumo: String(i.consumo).replace('.', ','), tol: String(i.tolerancia_pct).replace('.', ',') })) }
-        : { nome: '', unidade: 'm²', ativo: true, itens: [{ materialId: data.materiais[0]?.id || '', consumo: '', tol: '5' }] });
+        : { nome: '', unidade: 'm²', ativo: true, rup: '', itens: [{ materialId: data.materiais[0]?.id || '', consumo: '', tol: '5' }] });
       const salvarServico = async (ev) => {
         ev.preventDefault();
         const f = servForm;
@@ -960,7 +974,7 @@
         if (!f.nome.trim() || !itens.length) return alert('Informe o nome do serviço e pelo menos um material com o consumo por unidade.');
         if (new Set(itens.map(i => i.materialId)).size !== itens.length) return alert('O mesmo material aparece duas vezes.');
         const okS = await executar(async () => {
-          const reg = { nome: f.nome.trim(), unidade: f.unidade.trim() || 'un', ativo: f.ativo };
+          const reg = { nome: f.nome.trim(), unidade: f.unidade.trim() || 'un', ativo: f.ativo, rup_ref: numBR(f.rup) > 0 ? numBR(f.rup) : null };
           let id = f.id;
           if (id) ok(await sb.from('servicos_producao').update(reg).eq('id', id));
           else id = ok(await sb.from('servicos_producao').insert(reg).select().single()).id;
@@ -1549,6 +1563,7 @@
         { id: 'obras', label: 'Cadastro de Obras', icon: 'building' },
         { id: 'orcamento', label: 'Orçamento e Cronograma', icon: 'calendar', badge: etapasAtrasadas || null },
         { id: 'consumo', label: 'Consumo e Perdas', icon: 'gauge', badge: consumoAlertas || null },
+        { id: 'produtividade', label: 'Produtividade', icon: 'bolt' },
         { id: 'diario', label: 'Diário de Obra', icon: 'book' },
         { id: 'qualidade', label: 'Qualidade e Pendências', icon: 'check', badge: pendAtrasadas || null },
         { id: 'compras', label: 'Compras & Fornecedores', icon: 'cart' },
@@ -2584,6 +2599,112 @@
                             </div>
                           ))}
                         </div>
+                      </div>
+                    </>)}
+                  </div>
+                );
+              })()}
+
+              {aba === 'produtividade' && (() => {
+                const eng = user.perfil === 'Engenheiro';
+                const h = hojeISO(), ob = data.obras.find(o => o.id === consObraId);
+                const per = prodPeriodo === 'mes' ? [h.slice(0, 8) + '01', h] : prodPeriodo === '30d' ? [somaDias(-30), h] : prodPeriodo === 'mes_ant' ? (() => { const d = new Date(); d.setDate(0); const f = isoLocal(d); return [f.slice(0, 8) + '01', f]; })() : [ob?.inicio || '2000-01-01', h];
+                const prods = data.producoes.filter(x => x.obra_id === consObraId && x.dia >= per[0] && x.dia <= per[1] && x.hh > 0);
+                const custoHora = (fid) => { const r = data.remuneracoes[fid]; if (!r) return 0; return r.tipo === 'Mensal' ? r.valor / 220 : r.valor / 8; };
+                const fmtQ = (q, d = 2) => Number(q).toLocaleString('pt-BR', { maximumFractionDigits: d });
+                const nomeSv = (sv) => sv?.nome.replace(' (exemplo)', '');
+                // por serviço
+                const porServ = data.servicos.map(sv => {
+                  const ps = prods.filter(x => x.servico_id === sv.id); if (!ps.length) return null;
+                  const q = ps.reduce((s, x) => s + x.quantidade, 0), hh = ps.reduce((s, x) => s + x.hh, 0);
+                  const custo = ps.reduce((s, x) => s + data.prodFuncs.filter(f => f.producao_id === x.id).reduce((t, f) => t + (x.hh / x.pessoas) * custoHora(f.funcionario_id), 0), 0);
+                  const qComCusto = ps.filter(x => data.prodFuncs.some(f => f.producao_id === x.id)).reduce((s, x) => s + x.quantidade, 0);
+                  const rup = hh / q; return { sv, q, hh, rup, dif: sv.rup_ref ? (rup / sv.rup_ref - 1) * 100 : null, custoUn: qComCusto ? custo / qComCusto : null };
+                }).filter(Boolean);
+                // por equipe (mesma composição de pessoas) e serviço
+                const grupos = {};
+                prods.forEach(x => { const k = x.servico_id + '|' + (x.equipe || 'sem equipe'); const g = grupos[k] || (grupos[k] = { sv: data.servicos.find(v => v.id === x.servico_id), equipe: x.equipe || 'sem equipe', q: 0, hh: 0, n: 0 }); g.q += x.quantidade; g.hh += x.hh; g.n++; });
+                const equipes = Object.values(grupos).map(g => ({ ...g, rup: g.hh / g.q })).sort((a, b) => a.sv?.nome.localeCompare(b.sv?.nome) || a.rup - b.rup);
+                const melhorDoServ = {}; equipes.forEach(g => { if (!melhorDoServ[g.sv?.id] || g.rup < melhorDoServ[g.sv?.id]) melhorDoServ[g.sv?.id] = g.rup; });
+                const hhTotal = prods.reduce((s, x) => s + x.hh, 0);
+                const piores = porServ.filter(x => x.dif !== null && x.dif > 10);
+                // ganho possível: se todas as equipes de um serviço trabalhassem como a melhor
+                const ganhoHh = equipes.reduce((s, g) => s + (g.hh - g.q * melhorDoServ[g.sv?.id]), 0);
+                const corDif = (d) => d === null ? '' : d > 10 ? 'text-red-700' : d < -5 ? 'text-emerald-700' : 'text-slate-700';
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Produtividade</h3>
+                        <p className="text-xs text-slate-500">Homem-hora gasto por unidade produzida (Hh/m², Hh/m³, Hh/kg). Quanto <b>menor</b>, melhor. Vem da produção lançada com quem executou e as horas.</p>
+                      </div>
+                      <div className="flex flex-wrap gap-2 items-center">
+                        {selectedObra === 'ALL' && <select value={consObraId} onChange={e => setConsObra(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold">{data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}</select>}
+                        <select value={prodPeriodo} onChange={e => setProdPeriodo(e.target.value)} className="border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold" aria-label="Período">
+                          <option value="obra">Desde o início da obra</option><option value="mes">Este mês</option><option value="mes_ant">Mês passado</option><option value="30d">Últimos 30 dias</option>
+                        </select>
+                        {can('producao.lancar') && <button type="button" onClick={abrirProducao} className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Lançar produção</button>}
+                      </div>
+                    </div>
+
+                    {prods.length === 0 ? (
+                      <div className="bg-white rounded-2xl border border-slate-200 p-8 text-sm text-slate-600 space-y-2">
+                        <p className="font-bold text-slate-800">Sem produção com horas no período</p>
+                        <p>Ao <b>Lançar produção</b>, marque quem executou (ou o empreiteiro e o nº de pessoas) e as horas trabalhadas. O SIGO calcula o homem-hora por unidade de cada equipe.</p>
+                        {eng && <p>Em <b>Consumo e Perdas → Serviços e índices</b>, informe a produtividade de referência de cada serviço para comparar.</p>}
+                      </div>
+                    ) : (<>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Homem-hora lançado</p><p className="text-2xl font-extrabold">{fmtQ(hhTotal, 0)} Hh</p><p className="text-xs text-slate-500">{prods.length} lançamento(s)</p></div>
+                        <div className={`border rounded-xl p-4 ${piores.length ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}><p className="text-xs text-slate-500 font-bold uppercase">Serviços abaixo da referência</p><p className={`text-2xl font-extrabold ${piores.length ? 'text-red-700' : 'text-emerald-700'}`}>{piores.length}</p><p className="text-xs text-slate-500">{piores[0] ? `${nomeSv(piores[0].sv)}: ${piores[0].dif.toFixed(0)}% mais horas` : 'tudo na referência ou melhor'}</p></div>
+                        <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">Se todas rendessem como a melhor</p><p className="text-2xl font-extrabold text-emerald-700">−{fmtQ(ganhoHh, 0)} Hh</p><p className="text-xs text-slate-500">≈ {fmtQ(ganhoHh / 8, 0)} diárias a menos no período</p></div>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                        <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Por serviço — {fmtData(per[0])} a {fmtData(per[1])}</h4></div>
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                            <tr><th className="px-4 py-3">Serviço</th><th className="px-4 py-3 text-right">Produzido</th><th className="px-4 py-3 text-right">Homem-hora</th><th className="px-4 py-3 text-right">Hh por unidade</th><th className="px-4 py-3 text-right">Referência</th><th className="px-4 py-3 text-right">x referência</th>{eng && <th className="px-4 py-3 text-right">Mão de obra própria / unid.</th>}</tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {porServ.map(x => (
+                              <tr key={x.sv.id}>
+                                <td className="px-4 py-2 font-semibold">{nomeSv(x.sv)}</td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap">{fmtQ(x.q)} {x.sv.unidade}</td>
+                                <td className="px-4 py-2 text-right">{fmtQ(x.hh, 0)}</td>
+                                <td className="px-4 py-2 text-right font-bold whitespace-nowrap">{fmtQ(x.rup, 3)} Hh/{x.sv.unidade}</td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap">{x.sv.rup_ref ? `${fmtQ(x.sv.rup_ref, 3)}` : <span className="text-xs text-slate-400">não informada</span>}</td>
+                                <td className={`px-4 py-2 text-right font-bold ${corDif(x.dif)}`}>{x.dif === null ? '—' : `${x.dif > 0 ? '+' : ''}${x.dif.toFixed(0)}%`}</td>
+                                {eng && <td className="px-4 py-2 text-right whitespace-nowrap">{x.custoUn ? `${formatBRL(x.custoUn)}/${x.sv.unidade}` : '—'}</td>}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p className="px-6 py-3 text-[11px] text-slate-500">"x referência" positivo = gastou mais horas que a referência (pior). {eng ? 'O custo usa diária ÷ 8 h ou salário ÷ 220 h, sem encargos. Compare com o preço por unidade do empreiteiro para decidir se compensa empreitar.' : ''}</p>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                        <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Por equipe</h4></div>
+                        <table className="w-full text-sm text-left">
+                          <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                            <tr><th className="px-4 py-3">Serviço</th><th className="px-4 py-3">Equipe</th><th className="px-4 py-3 text-right">Produzido</th><th className="px-4 py-3 text-right">Homem-hora</th><th className="px-4 py-3 text-right">Hh por unidade</th><th className="px-4 py-3">Comparação</th></tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {equipes.map((g, k) => { const melhor = melhorDoServ[g.sv?.id], pior = g.rup / melhor - 1; const ref = g.sv?.rup_ref; return (
+                              <tr key={k}>
+                                <td className="px-4 py-2 text-xs">{nomeSv(g.sv)}</td>
+                                <td className="px-4 py-2 font-semibold">{g.equipe}</td>
+                                <td className="px-4 py-2 text-right whitespace-nowrap">{fmtQ(g.q)} {g.sv?.unidade}</td>
+                                <td className="px-4 py-2 text-right">{fmtQ(g.hh, 0)}</td>
+                                <td className="px-4 py-2 text-right font-bold whitespace-nowrap">{fmtQ(g.rup, 3)}</td>
+                                <td className="px-4 py-2 w-56">
+                                  <div className="h-2 bg-slate-100 rounded-full overflow-hidden"><div className={`h-full ${pior < 0.005 ? 'bg-emerald-500' : pior > 0.15 ? 'bg-red-500' : 'bg-amber-500'}`} style={{ width: Math.min(100, (melhor / g.rup) * 100) + '%' }} /></div>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">{pior < 0.005 ? 'melhor equipe neste serviço' : `${(pior * 100).toFixed(0)}% mais horas que a melhor`}{ref ? ` · ref. ${fmtQ(ref, 3)}` : ''}</p>
+                                </td>
+                              </tr>
+                            ); })}
+                          </tbody>
+                        </table>
                       </div>
                     </>)}
                   </div>
@@ -3871,7 +3992,25 @@
                     </label>
                   </div>
                   <input value={prodForm.local} onChange={e => setProdForm({ ...prodForm, local: e.target.value })} placeholder="Local (ex.: 2º pavimento, apto 201)" className="w-full border rounded-lg px-3 py-2" />
-                  <input value={prodForm.equipe} onChange={e => setProdForm({ ...prodForm, equipe: e.target.value })} placeholder="Equipe (ex.: José Carlos e Antônio)" className="w-full border rounded-lg px-3 py-2" />
+                  <div className="space-y-1">
+                    <p className="text-xs font-bold uppercase text-slate-500">Quem executou</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {data.funcionarios.filter(fu => fu.obraId === prodForm.obraId).map(fu => { const marc = prodForm.funcs.includes(fu.id); const pres = data.presencas.some(p => p.funcionarioId === fu.id && p.dia === prodForm.dia && p.status === 'Presente'); return (
+                        <button key={fu.id} type="button" onClick={() => setProdForm({ ...prodForm, funcs: marc ? prodForm.funcs.filter(x => x !== fu.id) : [...prodForm.funcs, fu.id] })}
+                          className={`text-xs px-2.5 py-1 rounded-lg border ${marc ? 'bg-slate-900 text-white border-slate-900' : 'border-slate-300 text-slate-700'}`} title={pres ? 'Presente neste dia' : ''}>{marc ? '✓ ' : ''}{fu.nome.split(' ').slice(0, 2).join(' ')}{pres && !marc ? ' •' : ''}</button>
+                      ); })}
+                    </div>
+                    {prodForm.funcs.length === 0 && (
+                      <div className="grid grid-cols-3 gap-2 pt-1">
+                        <input value={prodForm.equipe} onChange={e => setProdForm({ ...prodForm, equipe: e.target.value })} placeholder="ou empreiteiro / equipe" className="col-span-2 border rounded-lg px-3 py-2" />
+                        <input type="number" min="1" value={prodForm.pessoas} onChange={e => setProdForm({ ...prodForm, pessoas: e.target.value })} placeholder="nº pessoas" className="border rounded-lg px-3 py-2" />
+                      </div>
+                    )}
+                  </div>
+                  <label className="block text-xs font-bold uppercase text-slate-500">Horas trabalhadas por pessoa nesse serviço
+                    <input inputMode="decimal" value={prodForm.horas} onChange={e => setProdForm({ ...prodForm, horas: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" />
+                    <span className="text-[11px] font-normal normal-case text-slate-500">Total: {r2((prodForm.funcs.length || parseInt(prodForm.pessoas) || 0) * (numBR(prodForm.horas) || 0))} homem-hora. Se lançar a semana toda, some as horas da semana.</span>
+                  </label>
                   {data.etapas.some(x => x.obra_id === prodForm.obraId) && (
                     <select value={prodForm.etapaId} onChange={e => setProdForm({ ...prodForm, etapaId: e.target.value })} className="w-full border rounded-lg px-3 py-2"><option value="">Etapa: —</option>{data.etapas.filter(x => x.obra_id === prodForm.obraId).map(x => <option key={x.id} value={x.id}>Etapa: {x.nome}</option>)}</select>
                   )}
@@ -3908,6 +4047,9 @@
                   })}
                   <button type="button" onClick={() => setServForm({ ...servForm, itens: [...servForm.itens, { materialId: data.materiais[0]?.id || '', consumo: '', tol: '5' }] })} className="text-xs font-bold text-amber-700 hover:underline">+ Adicionar material</button>
                   <p className="text-xs text-slate-500">Referências comuns (TCPO/SINAPI): alvenaria de bloco 14x19x29 ≈ 13,5 blocos/m²; concreto virado fck 25 ≈ 7 sacos de cimento, 0,55 m³ de areia e 0,7 m³ de brita por m³. Tolerâncias usuais: 3 a 5% para cimento, aço e blocos; 10 a 15% para areia, argamassa e madeira.</p>
+                  <label className="block text-xs font-bold uppercase text-slate-500">Produtividade de referência (homem-hora por {servForm.unidade || 'unidade'})
+                    <input inputMode="decimal" value={servForm.rup} onChange={e => setServForm({ ...servForm, rup: e.target.value })} placeholder="Ex.: 0,9 Hh/m² para alvenaria" className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal normal-case text-slate-900" />
+                  </label>
                   <label className="flex items-center gap-2"><input type="checkbox" checked={servForm.ativo} onChange={e => setServForm({ ...servForm, ativo: e.target.checked })} /> Aparece em Lançar produção</label>
                   <div className="flex justify-end gap-2 pt-2">
                     <button type="button" onClick={() => setServForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>

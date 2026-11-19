@@ -381,3 +381,33 @@ begin
     end if;
   end loop;
 end $$;
+-- ---------------- Produtividade da obra de exemplo ----------------
+do $$
+declare o uuid; r record; k int := 0; f int[]; rup numeric; dias numeric;
+begin
+  select id into o from obras where nome = 'Residencial Vista do Cabo (exemplo)';
+  if o is null or exists (select 1 from producao_funcionarios pf join producoes p on p.id = pf.producao_id where p.obra_id = o) then return; end if;
+  update servicos_producao set rup_ref = 10 where nome = 'Concreto virado na obra fck 25 (exemplo)';
+  update servicos_producao set rup_ref = 0.09 where nome = 'Armação (exemplo)';
+  update servicos_producao set rup_ref = 1.2 where nome = 'Formas de madeira (exemplo)';
+  update servicos_producao set rup_ref = 0.9 where nome = 'Alvenaria bloco 14x19x29 (exemplo)';
+  for r in select p.*, s.nome sn from producoes p join servicos_producao s on s.id = p.servico_id where p.obra_id = o order by p.dia, s.nome loop
+    k := k + 1;
+    if r.sn like 'Concreto%' then
+      if k % 2 = 0 then f := array[2, 6]; rup := 9.0 + (k % 3) * 0.3; else f := array[3, 7]; rup := 11.6 + (k % 3) * 0.4; end if;
+    elsif r.sn like 'Armação%' then
+      if r.dia < date '2026-09-14' then f := array[2, 6]; rup := 0.112; else f := array[5, 7]; rup := 0.082 + (k % 3) * 0.003; end if;
+    else
+      if r.dia < date '2026-09-14' then f := array[3, 7]; rup := 1.42; else f := array[4, 6]; rup := 1.08 + (k % 3) * 0.04; end if;
+    end if;
+    update producoes set pessoas = array_length(f, 1), hh = round(r.quantidade * rup, 1),
+      equipe = (select string_agg(split_part(fu.nome, ' ', 1), ' e ') from funcionarios fu where fu.obra_id = o and fu.nome in (
+                  select x.nome from (values (1,'Severino Alves da Silva'),(2,'José Carlos Ferreira'),(3,'Antônio Marcos Lima'),(4,'Francisco das Chagas Rocha'),
+                                             (5,'Raimundo Nonato Sousa'),(6,'Luiz Henrique Costa'),(7,'Pedro Henrique Araújo')) x(n, nome) where x.n = any(f)))
+    where id = r.id;
+    insert into producao_funcionarios (producao_id, funcionario_id)
+    select r.id, fu.id from funcionarios fu where fu.obra_id = o and fu.nome in (
+      select x.nome from (values (1,'Severino Alves da Silva'),(2,'José Carlos Ferreira'),(3,'Antônio Marcos Lima'),(4,'Francisco das Chagas Rocha'),
+                                 (5,'Raimundo Nonato Sousa'),(6,'Luiz Henrique Costa'),(7,'Pedro Henrique Araújo')) x(n, nome) where x.n = any(f));
+  end loop;
+end $$;
