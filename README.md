@@ -59,3 +59,6 @@ O sistema é um único `index.html`. Para publicar no GitHub Pages:
 ## Plano gratuito do Supabase
 Atende bem o uso inicial (500 MB de banco). Projetos gratuitos sem nenhum acesso
 por 7 dias são pausados (os dados não se perdem; basta reativar no painel).
+
+### Obra fictícia de exemplo
+Para conhecer o sistema com dados, rode [`supabase/exemplo-obra-ficticia.sql`](supabase/exemplo-obra-ficticia.sql) no SQL Editor: cria a obra "Residencial Vista do Cabo (exemplo)" com 3 meses de uso. Para apagar só ela, rode [`supabase/remover-exemplo.sql`](supabase/remover-exemplo.sql).
