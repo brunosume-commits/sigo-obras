@@ -61,6 +61,7 @@
         wallet: <><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></>,
         book: <><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/><path d="M8 7h8"/><path d="M8 11h6"/></>,
         camera: <><path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/><circle cx="12" cy="13" r="3"/></>,
+        trending: <><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></>,
         calendar: <><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M7 14h4M7 18h8"/></>,
         ruler: <><path d="M21.3 8.7 8.7 21.3a1 1 0 0 1-1.4 0l-4.6-4.6a1 1 0 0 1 0-1.4L15.3 2.7a1 1 0 0 1 1.4 0l4.6 4.6a1 1 0 0 1 0 1.4z"/><path d="m7.5 10.5 2 2M10.5 7.5l2 2M13.5 4.5l2 2M4.5 13.5l2 2"/></>,
         shield: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></>,
@@ -166,7 +167,7 @@
     const PERMISSOES = {
       'Engenheiro': {
         abaInicial: 'dashboard',
-        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'diario', 'compras', 'financeiro', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'usuarios'],
+        abas: ['materiais', 'dashboard', 'obras', 'orcamento', 'diario', 'compras', 'financeiro', 'caixa', 'medicoes', 'funcionarios', 'epi', 'documentos', 'folha', 'relatorios', 'usuarios'],
         acoes: ['*'],
       },
       'Almoxarife': {
@@ -185,7 +186,7 @@
     const SUPABASE_CONFIGURADO = SUPABASE_URL.startsWith('https://') && SUPABASE_ANON_KEY.length > 20;
     const sb = SUPABASE_CONFIGURADO ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY) : null;
 
-    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [] };
+    const DADOS_VAZIOS = { obras: [], materiais: [], movimentacoes: [], fornecedores: [], compras: [], despesas: [], funcionarios: [], perfis: [], presencas: [], remuneracoes: {}, presencasFolha: [], folha: null, folhaItens: [], diarios: [], presencasDiario: [], documentos: [], epis: [], contratos: [], contratoItens: [], medicoes: [], medicaoItens: [], etapas: [], etapaItens: [], avancoHist: [], cotacoes: [], cotacaoItens: [], cotacaoForns: [], cotacaoPrecos: [], receitas: [], caixa: null };
 
     // Converte timestamptz do banco para "AAAA-MM-DD HH:MM" no horário local
     const tsLocal = (ts) => { const d = new Date(ts); return `${isoLocal(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
@@ -310,8 +311,10 @@
         (eng || perfil === 'Almoxarife') ? sb.from('cotacao_itens').select('*').order('ordem', { ascending: true }) : Promise.resolve({ data: [] }),
         (eng || perfil === 'Almoxarife') ? sb.from('cotacao_fornecedores').select('*') : Promise.resolve({ data: [] }),
         (eng || perfil === 'Almoxarife') ? sb.from('cotacao_precos').select('*') : Promise.resolve({ data: [] }),
+        eng ? sb.from('receitas').select('*').order('vencimento', { ascending: true }) : Promise.resolve({ data: [] }),
+        eng ? sb.from('caixa').select('*') : Promise.resolve({ data: [] }),
       ];
-      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos] = (await Promise.all(consultas)).map(ok);
+      const [obras, materiais, estoques, movs, forns, compras, funcs, despesas, perfis, presencas, rems, presF, folhas, itensF, diarios, presDiario, documentos, epis, contratos, contItens, medicoes, medItens, etapas, etapaItens, avancoHist, cotacoes, cotItens, cotForns, cotPrecos, receitas, caixa] = (await Promise.all(consultas)).map(ok);
       const fotos = diarios.length ? ok(await sb.from('diario_fotos').select('*').in('diario_id', diarios.map(d => d.id)).order('criado_em')) : [];
       return {
         obras: obras.map(o => ({ ...o, orcamento: num(o.orcamento) })),
@@ -330,7 +333,7 @@
           id: c.id, obraId: c.obra_id, materialId: c.material_id, fornecedorId: c.fornecedor_id, qtd: num(c.qtd),
           precoUnit: num(c.preco_unit), entrega: c.entrega, status: c.status, solicitante: c.solicitante, dataSolicitacao: c.data_solicitacao
         })),
-        despesas: despesas.map(d => ({ id: d.id, compraId: d.compra_id, obraId: d.obra_id, etapaId: d.etapa_id || '', descricao: d.descricao, categoria: d.categoria, valor: num(d.valor), vencimento: d.vencimento, status: d.status })),
+        despesas: despesas.map(d => ({ id: d.id, compraId: d.compra_id, obraId: d.obra_id, etapaId: d.etapa_id || '', pagoEm: d.pago_em, descricao: d.descricao, categoria: d.categoria, valor: num(d.valor), vencimento: d.vencimento, status: d.status })),
         funcionarios: funcs.map(f => ({ id: f.id, nome: f.nome, funcao: f.funcao, obraId: f.obra_id, presenca: f.presenca })),
         perfis,
         presencas: presencas.map(p => ({ funcionarioId: p.funcionario_id, dia: p.dia, status: p.status })),
@@ -351,6 +354,8 @@
         avancoHist: avancoHist.map(h => ({ ...h, avanco: num(h.avanco) })),
         cotacoes, cotacaoItens: cotItens.map(i => ({ ...i, qtd: num(i.qtd) })), cotacaoForns: cotForns,
         cotacaoPrecos: cotPrecos.map(x => ({ ...x, preco_unit: num(x.preco_unit) })),
+        receitas: receitas.map(r => ({ ...r, valor: num(r.valor) })),
+        caixa: caixa[0] ? { ...caixa[0], saldo_inicial: num(caixa[0].saldo_inicial) } : null,
       };
     }
 
@@ -418,7 +423,10 @@
       const [fichaEpi, setFichaEpi] = useState(null);   // id do funcionário com a ficha aberta
       const [contratoSel, setContratoSel] = useState('');
       const [orcObra, setOrcObra] = useState('');
-      const [cotForm, setCotForm] = useState(null);      // montar/editar a cotação (itens e fornecedores)
+      const [cotForm, setCotForm] = useState(null);
+      const [receitaForm, setReceitaForm] = useState(null);
+      const [saldoForm, setSaldoForm] = useState(null);
+      const [caixaHover, setCaixaHover] = useState(null);      // montar/editar a cotação (itens e fornecedores)
       const [mapa, setMapa] = useState(null);            // mapa de cotação aberto: { id, precos, forns, escolha }
       const [etapaModal, setEtapaModal] = useState(false);
       const [etapaForm, setEtapaForm] = useState({});
@@ -714,6 +722,7 @@
         if (!(valor > 0)) return alert('Informe um valor maior que zero.');
         const reg = { obra_id: novaDespesaForm.obraId, descricao: novaDespesaForm.descricao.trim(), categoria: novaDespesaForm.categoria,
                       valor, vencimento: novaDespesaForm.vencimento || null, status: novaDespesaForm.status,
+                      pago_em: novaDespesaForm.status === 'Pago' ? (novaDespesaForm.pagoEm || hojeISO()) : null,
                       etapa_id: data.etapas.some(e => e.id === novaDespesaForm.etapaId && e.obra_id === novaDespesaForm.obraId) ? novaDespesaForm.etapaId : null };
         if (await executar(async () => ok(novaDespesaForm.id
           ? await sb.from('despesas').update(reg).eq('id', novaDespesaForm.id)
@@ -744,7 +753,7 @@
       };
 
       const alternarStatusDespesa = (d) => executar(async () =>
-        ok(await sb.from('despesas').update({ status: d.status === 'Pago' ? 'A pagar' : 'Pago' }).eq('id', d.id)));
+        ok(await sb.from('despesas').update(d.status === 'Pago' ? { status: 'A pagar', pago_em: null } : { status: 'Pago', pago_em: hojeISO() }).eq('id', d.id)));
 
       const marcarPresenca = (f, presenca, dia) => {
         if (dia > hojeISO()) return alert('Não é possível registrar presença em data futura.');
@@ -861,6 +870,46 @@
         const { data: u, error } = await sb.storage.from('documentos').createSignedUrl(doc.arquivo, 600);
         if (error || !u?.signedUrl) { janela && janela.close(); return alert('Não foi possível abrir o arquivo.'); }
         if (janela) janela.location.href = u.signedUrl; else window.location.href = u.signedUrl;
+      };
+
+      // ---------- Fluxo de caixa ----------
+      const caixaInfo = useMemo(() => {
+        if (user?.perfil !== 'Engenheiro') return null;
+        const hoje = hojeISO(), base = data.caixa?.data_saldo || hoje, saldoIni = data.caixa?.saldo_inicial || 0;
+        const lanc = [
+          ...data.despesas.map(d => ({ id: 'd' + d.id, tipo: 'saida', desc: d.descricao, obraId: d.obraId, valor: d.valor, feito: d.status === 'Pago',
+            dia: d.status === 'Pago' ? (d.pagoEm || d.vencimento || hoje) : (d.vencimento || hoje), venc: d.vencimento })),
+          ...data.receitas.map(r => ({ id: 'r' + r.id, tipo: 'entrada', desc: r.descricao, obraId: r.obra_id, valor: r.valor, feito: r.status === 'Recebido',
+            dia: r.status === 'Recebido' ? (r.recebido_em || r.vencimento) : r.vencimento, venc: r.vencimento })),
+        ];
+        const sinal = (l) => l.tipo === 'entrada' ? l.valor : -l.valor;
+        const saldoAtual = saldoIni + lanc.filter(l => l.feito && l.dia >= base).reduce((s, l) => s + sinal(l), 0);
+        const abertos = lanc.filter(l => !l.feito).map(l => ({ ...l, atrasado: l.dia < hoje, diaProj: l.dia < hoje ? hoje : l.dia })).sort((a, b) => a.diaProj.localeCompare(b.diaProj));
+        const ate = (n) => abertos.filter(l => l.diaProj <= somaDias(n));
+        const proj = (n) => saldoAtual + ate(n).reduce((s, l) => s + sinal(l), 0);
+        let corrido = saldoAtual, negativo = null;
+        const prox = abertos.map(l => { corrido += sinal(l); if (corrido < 0 && !negativo) negativo = l.diaProj; return { ...l, saldo: corrido }; });
+        return { hoje, base, saldoIni, lanc, sinal, saldoAtual, abertos, ate, proj, prox, negativo,
+          atrasadosPagar: abertos.filter(l => l.atrasado && l.tipo === 'saida'), atrasadosReceber: abertos.filter(l => l.atrasado && l.tipo === 'entrada') };
+      }, [user?.perfil, data.despesas, data.receitas, data.caixa]);
+      const caixaAlerta = caixaInfo ? caixaInfo.atrasadosPagar.length + (caixaInfo.negativo && caixaInfo.negativo <= somaDias(30) ? 1 : 0) : 0;
+      const abrirReceita = (r) => setReceitaForm(r ? { id: r.id, obraId: r.obra_id || '', descricao: r.descricao, categoria: r.categoria, valor: String(r.valor).replace('.', ','), vencimento: r.vencimento, status: r.status, recebidoEm: r.recebido_em }
+        : { obraId: selectedObra !== 'ALL' ? selectedObra : '', descricao: '', categoria: 'Medição do cliente', valor: '', vencimento: somaDias(30), status: 'A receber' });
+      const salvarReceita = async (ev) => {
+        ev.preventDefault();
+        const f = receitaForm, valor = r2(numBR(f.valor));
+        if (!f.descricao.trim() || !(valor > 0) || !f.vencimento) return alert('Preencha descrição, valor e data prevista.');
+        const reg = { obra_id: f.obraId || null, descricao: f.descricao.trim(), categoria: f.categoria, valor, vencimento: f.vencimento, status: f.status,
+                      recebido_em: f.status === 'Recebido' ? (f.recebidoEm || hojeISO()) : null };
+        if (await executar(async () => ok(f.id ? await sb.from('receitas').update(reg).eq('id', f.id) : await sb.from('receitas').insert(reg)))) setReceitaForm(null);
+      };
+      const alternarReceita = (r) => executar(async () => ok(await sb.from('receitas').update(r.status === 'Recebido' ? { status: 'A receber', recebido_em: null } : { status: 'Recebido', recebido_em: hojeISO() }).eq('id', r.id)));
+      const excluirReceita = (r) => { if (confirm(`Excluir a receita "${r.descricao}"?`)) executar(async () => ok(await sb.from('receitas').delete().eq('id', r.id))); };
+      const salvarSaldo = async (ev) => {
+        ev.preventDefault();
+        const v = numBR(saldoForm.valor);
+        if (Number.isNaN(v) || !saldoForm.data) return alert('Informe o saldo e a data.');
+        if (await executar(async () => ok(await sb.from('caixa').update({ saldo_inicial: r2(v), data_saldo: saldoForm.data, atualizado_em: new Date().toISOString() }).eq('id', 1)))) setSaldoForm(null);
       };
 
       // ---------- Cotação ----------
@@ -1333,6 +1382,7 @@
         { id: 'diario', label: 'Diário de Obra', icon: 'book' },
         { id: 'compras', label: 'Compras & Fornecedores', icon: 'cart' },
         { id: 'financeiro', label: 'Controle Financeiro', icon: 'dollar' },
+        { id: 'caixa', label: 'Fluxo de Caixa', icon: 'trending', badge: caixaAlerta || null },
         { id: 'medicoes', label: 'Medições', icon: 'ruler', badge: medRascunhos || null },
         { id: 'funcionarios', label: 'Funcionários', icon: 'users' },
         { id: 'epi', label: 'Controle de EPI', icon: 'shield', badge: episTroca.length || null },
@@ -2479,6 +2529,138 @@
                 );
               })()}
 
+              {aba === 'caixa' && caixaInfo && (() => {
+                const C = caixaInfo, hoje = C.hoje;
+                const fmtD = (d) => fmtData(d);
+                const meses = mesesEntre(C.base < hoje ? C.base : hoje, somaDias(180));
+                const mesHoje = hoje.slice(0, 7);
+                let acum = C.saldoIni;
+                const linhas = meses.map(m => {
+                  const no = (l) => (l.feito ? l.dia : l.diaProj || (l.dia < hoje ? hoje : l.dia)).slice(0, 7) === m;
+                  const real = C.lanc.filter(l => l.feito && l.dia >= C.base && no(l));
+                  const prev = C.abertos.filter(no);
+                  const er = real.filter(l => l.tipo === 'entrada').reduce((s, l) => s + l.valor, 0), sr = real.filter(l => l.tipo === 'saida').reduce((s, l) => s + l.valor, 0);
+                  const ep = prev.filter(l => l.tipo === 'entrada').reduce((s, l) => s + l.valor, 0), sp = prev.filter(l => l.tipo === 'saida').reduce((s, l) => s + l.valor, 0);
+                  acum += er - sr + ep - sp;
+                  return { m, er, sr, ep, sp, saldo: acum };
+                });
+                // saldo dia a dia nos próximos 90 dias
+                const N = 90, dias = Array.from({ length: N + 1 }, (_, i) => somaDias(i));
+                let sd = C.saldoAtual; const serie = dias.map(d => { sd += C.abertos.filter(l => l.diaProj === d).reduce((s, l) => s + C.sinal(l), 0); return sd; });
+                const W = 760, H = 220, L = 70, R = 16, T = 14, B = 28;
+                const mn = Math.min(0, ...serie), mx = Math.max(0, ...serie, 1);
+                const x = (i) => L + i / N * (W - L - R), y = (v) => T + (1 - (v - mn) / (mx - mn || 1)) * (H - T - B);
+                const path = serie.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+                const cartao = (t, v, sub, cor = '') => <div className="bg-white border border-slate-200 rounded-xl p-4"><p className="text-xs text-slate-500 font-bold uppercase">{t}</p><p className={`text-xl font-extrabold ${cor}`}>{formatBRL(v)}</p>{sub && <p className="text-xs text-slate-500">{sub}</p>}</div>;
+                const receitasLista = data.receitas.filter(r => selectedObra === 'ALL' || r.obra_id === selectedObra || !r.obra_id);
+                return (
+                  <div className="space-y-6">
+                    <div className="flex flex-wrap justify-between items-center gap-3">
+                      <div>
+                        <h3 className="font-bold text-slate-800 text-lg">Fluxo de caixa</h3>
+                        <p className="text-xs text-slate-500">Caixa da empresa (todas as obras): o que entrou e saiu, e o que está previsto pelas datas de vencimento.</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button type="button" onClick={() => setSaldoForm({ valor: String(C.saldoIni).replace('.', ','), data: C.base })} className="px-4 py-2.5 rounded-xl font-bold text-sm border border-slate-300 bg-white hover:bg-slate-100">Saldo inicial</button>
+                        <button type="button" onClick={() => abrirReceita(null)} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold text-sm flex items-center gap-2"><Icon name="plus" className="w-4 h-4" /> Nova receita</button>
+                      </div>
+                    </div>
+
+                    {C.negativo && (
+                      <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-4 text-sm flex items-center gap-3">
+                        <Icon name="alert" className="w-5 h-5 shrink-0" />
+                        <span><b>Atenção:</b> pelo previsto, o caixa fica negativo em <b>{fmtD(C.negativo)}</b>. Antecipe recebimentos ou renegocie pagamentos.</span>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                      {cartao('Saldo atual', C.saldoAtual, `saldo inicial de ${fmtD(C.base)} + o que entrou e saiu`, C.saldoAtual < 0 ? 'text-red-700' : '')}
+                      {cartao('A receber em 30 dias', C.ate(30).filter(l => l.tipo === 'entrada').reduce((s, l) => s + l.valor, 0), C.atrasadosReceber.length ? `${C.atrasadosReceber.length} atrasado(s)` : '', 'text-emerald-700')}
+                      {cartao('A pagar em 30 dias', C.ate(30).filter(l => l.tipo === 'saida').reduce((s, l) => s + l.valor, 0), C.atrasadosPagar.length ? `${C.atrasadosPagar.length} vencido(s)` : '', 'text-red-700')}
+                      {cartao('Saldo previsto em 30 dias', C.proj(30), `em 90 dias: ${formatBRL(C.proj(90))}`, C.proj(30) < 0 ? 'text-red-700' : '')}
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-2">
+                      <h4 className="font-bold text-slate-800">Saldo previsto — próximos 90 dias</h4>
+                      <div className="relative overflow-x-auto">
+                        <svg viewBox={`0 0 ${W} ${H}`} className="w-full min-w-[520px]" role="img" aria-label="Saldo de caixa previsto dia a dia nos próximos 90 dias"
+                          onMouseLeave={() => setCaixaHover(null)}
+                          onMouseMove={(ev) => { const r = ev.currentTarget.getBoundingClientRect(); const i = Math.round(((ev.clientX - r.left) / r.width * W - L) / (W - L - R) * N); setCaixaHover(i >= 0 && i <= N ? i : null); }}>
+                          {[mn, (mn + mx) / 2, mx].map((t, i) => <g key={i}><line x1={L} x2={W - R} y1={y(t)} y2={y(t)} stroke="#e2e8f0" /><text x={L - 6} y={y(t) + 3} textAnchor="end" fontSize="10" fill="#64748b">{Math.abs(t) >= 1000 ? Math.round(t / 1000).toLocaleString('pt-BR') + ' mil' : Math.round(t)}</text></g>)}
+                          {mn < 0 && <line x1={L} x2={W - R} y1={y(0)} y2={y(0)} stroke="#94a3b8" strokeDasharray="4 3" />}
+                          {[0, 30, 60, 90].map(i => <text key={i} x={x(i)} y={H - 8} textAnchor="middle" fontSize="10" fill="#64748b">{i === 0 ? 'hoje' : fmtD(dias[i]).slice(0, 5)}</text>)}
+                          <path d={path} fill="none" stroke="#2563eb" strokeWidth="2" strokeLinejoin="round" />
+                          {caixaHover !== null && <><line x1={x(caixaHover)} x2={x(caixaHover)} y1={T} y2={H - B} stroke="#94a3b8" /><circle cx={x(caixaHover)} cy={y(serie[caixaHover])} r="4" fill="#2563eb" stroke="#fff" strokeWidth="2" /></>}
+                        </svg>
+                        {caixaHover !== null && <div className="absolute top-1 bg-slate-900 text-white text-xs rounded-lg px-3 py-2 pointer-events-none" style={{ left: `min(calc(${x(caixaHover) / W * 100}% + 10px), calc(100% - 170px))` }}><p className="font-bold">{fmtD(dias[caixaHover])}</p><p>Saldo: {formatBRL(serie[caixaHover])}</p></div>}
+                      </div>
+                    </div>
+
+                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                      <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Mês a mês</h4><p className="text-xs text-slate-500">Realizado = pago/recebido. Previsto = em aberto, pela data de vencimento (atrasados entram no mês atual).</p></div>
+                      <table className="w-full text-sm text-right whitespace-nowrap">
+                        <thead className="bg-slate-50 text-slate-500 uppercase text-xs font-bold">
+                          <tr><th className="px-4 py-3 text-left">Mês</th><th className="px-4 py-3">Entrou</th><th className="px-4 py-3">Saiu</th><th className="px-4 py-3">A receber</th><th className="px-4 py-3">A pagar</th><th className="px-4 py-3">Saldo no fim do mês</th></tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {linhas.map(l => (
+                            <tr key={l.m} className={l.m === mesHoje ? 'bg-amber-50/50' : ''}>
+                              <td className="px-4 py-2 text-left font-semibold capitalize">{NOMES_MES[Number(l.m.slice(5)) - 1]}/{l.m.slice(2, 4)}</td>
+                              <td className="px-4 py-2 text-emerald-700">{l.er ? formatBRL(l.er) : '—'}</td>
+                              <td className="px-4 py-2 text-red-700">{l.sr ? formatBRL(l.sr) : '—'}</td>
+                              <td className="px-4 py-2 text-emerald-700/80">{l.ep ? formatBRL(l.ep) : '—'}</td>
+                              <td className="px-4 py-2 text-red-700/80">{l.sp ? formatBRL(l.sp) : '—'}</td>
+                              <td className={`px-4 py-2 font-bold ${l.saldo < 0 ? 'text-red-700' : ''}`}>{formatBRL(l.saldo)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                        <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Próximos lançamentos</h4></div>
+                        <table className="w-full text-sm">
+                          <tbody className="divide-y divide-slate-100">
+                            {C.prox.length === 0 && <tr><td className="px-6 py-6 text-center text-slate-400">Nada em aberto.</td></tr>}
+                            {C.prox.slice(0, 25).map(l => (
+                              <tr key={l.id}>
+                                <td className="px-4 py-2 text-xs whitespace-nowrap">{fmtD(l.venc || l.dia)}{l.atrasado && <span className="block text-[10px] font-bold text-red-700">atrasado</span>}</td>
+                                <td className="px-4 py-2"><p className="font-semibold text-slate-800">{l.desc}</p><p className="text-[11px] text-slate-500">{l.obraId ? getObraNome(l.obraId) : 'Empresa'}</p></td>
+                                <td className={`px-4 py-2 text-right whitespace-nowrap font-bold ${l.tipo === 'entrada' ? 'text-emerald-700' : 'text-red-700'}`}>{l.tipo === 'entrada' ? '+' : '−'} {formatBRL(l.valor)}</td>
+                                <td className={`px-4 py-2 text-right whitespace-nowrap text-xs ${l.saldo < 0 ? 'text-red-700 font-bold' : 'text-slate-500'}`}>{formatBRL(l.saldo)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        <p className="px-6 py-2 text-[11px] text-slate-400">A última coluna é o saldo do caixa depois de cada lançamento. Despesas são pagas em Controle Financeiro.</p>
+                      </div>
+
+                      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+                        <div className="px-6 py-4 border-b border-slate-100"><h4 className="font-bold text-slate-800">Receitas</h4></div>
+                        <table className="w-full text-sm">
+                          <tbody className="divide-y divide-slate-100">
+                            {receitasLista.length === 0 && <tr><td className="px-6 py-6 text-center text-slate-400">Nenhuma receita. Lance as medições do cliente, aportes e vendas em <b>Nova receita</b>.</td></tr>}
+                            {receitasLista.map(r => (
+                              <tr key={r.id}>
+                                <td className="px-4 py-2 text-xs whitespace-nowrap">{fmtD(r.status === 'Recebido' ? r.recebido_em : r.vencimento)}</td>
+                                <td className="px-4 py-2"><p className="font-semibold text-slate-800">{r.descricao}</p><p className="text-[11px] text-slate-500">{r.categoria} · {r.obra_id ? getObraNome(r.obra_id) : 'Empresa'}</p></td>
+                                <td className="px-4 py-2 text-right font-bold whitespace-nowrap">{formatBRL(r.valor)}</td>
+                                <td className="px-4 py-2 whitespace-nowrap">
+                                  <button type="button" onClick={() => alternarReceita(r)} className={`text-xs font-bold px-2 py-1 rounded mr-1 ${r.status === 'Recebido' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>{r.status}</button>
+                                  <BtnAcao onClick={() => abrirReceita(r)}>Editar</BtnAcao>
+                                  <BtnAcao perigo onClick={() => excluirReceita(r)}>Excluir</BtnAcao>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               {aba === 'medicoes' && (() => {
                 const contratos = data.contratos.filter(c => selectedObra === 'ALL' || c.obra_id === selectedObra);
                 const c = contratos.find(x => x.id === contratoSel) || contratos.find(x => x.status === 'Ativo') || contratos[0];
@@ -3170,6 +3352,62 @@
                     </li>
                   ); })}
                 </ul>
+              </div>
+            </div>
+          )}
+
+          {receitaForm && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-md w-full p-6 space-y-4">
+                <h3 className="text-lg font-extrabold">{receitaForm.id ? 'Editar receita' : 'Nova receita'}</h3>
+                <form onSubmit={salvarReceita} className="space-y-3 text-sm">
+                  <input value={receitaForm.descricao} onChange={e => setReceitaForm({ ...receitaForm, descricao: e.target.value })} placeholder="Ex.: 3ª medição do cliente" className="w-full border rounded-lg px-3 py-2" required />
+                  <div className="grid grid-cols-2 gap-2">
+                    <select value={receitaForm.categoria} onChange={e => setReceitaForm({ ...receitaForm, categoria: e.target.value })} className="border rounded-lg px-3 py-2">
+                      {['Medição do cliente', 'Parcela de contrato', 'Venda de unidade', 'Aporte', 'Empréstimo', 'Outros'].map(c => <option key={c}>{c}</option>)}
+                    </select>
+                    <select value={receitaForm.obraId} onChange={e => setReceitaForm({ ...receitaForm, obraId: e.target.value })} className="border rounded-lg px-3 py-2">
+                      <option value="">Empresa (sem obra)</option>
+                      {data.obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <label className="text-xs font-bold uppercase text-slate-500">Valor (R$)
+                      <input inputMode="decimal" value={receitaForm.valor} onChange={e => setReceitaForm({ ...receitaForm, valor: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" required />
+                    </label>
+                    <label className="text-xs font-bold uppercase text-slate-500">Previsto para
+                      <input type="date" value={receitaForm.vencimento} onChange={e => setReceitaForm({ ...receitaForm, vencimento: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" required />
+                    </label>
+                  </div>
+                  <select value={receitaForm.status} onChange={e => setReceitaForm({ ...receitaForm, status: e.target.value })} className="w-full border rounded-lg px-3 py-2">
+                    <option>A receber</option><option>Recebido</option>
+                  </select>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setReceitaForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          )}
+
+          {saldoForm && (
+            <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center p-4 z-50">
+              <div className="bg-white rounded-2xl max-w-sm w-full p-6 space-y-4">
+                <h3 className="text-lg font-extrabold">Saldo inicial do caixa</h3>
+                <p className="text-sm text-slate-600">Quanto havia na conta da empresa no começo do dia escolhido. O SIGO soma o que foi recebido e pago a partir dessa data.</p>
+                <form onSubmit={salvarSaldo} className="space-y-3 text-sm">
+                  <label className="block text-xs font-bold uppercase text-slate-500">Saldo (R$)
+                    <input inputMode="decimal" value={saldoForm.valor} onChange={e => setSaldoForm({ ...saldoForm, valor: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" required />
+                  </label>
+                  <label className="block text-xs font-bold uppercase text-slate-500">Em
+                    <input type="date" value={saldoForm.data} onChange={e => setSaldoForm({ ...saldoForm, data: e.target.value })} className="w-full border rounded-lg px-3 py-2 mt-1 text-sm font-normal text-slate-900" required />
+                  </label>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button type="button" onClick={() => setSaldoForm(null)} className="px-4 py-2 border rounded-lg font-bold">Cancelar</button>
+                    <button type="submit" disabled={enviando} className="disabled:opacity-50 px-4 py-2 bg-slate-900 text-white rounded-lg font-bold">Salvar</button>
+                  </div>
+                </form>
               </div>
             </div>
           )}
